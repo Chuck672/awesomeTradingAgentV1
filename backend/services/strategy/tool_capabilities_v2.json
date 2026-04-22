@@ -1,0 +1,72 @@
+{
+  "capabilities_version": "1.0",
+  "updated_at": "2026-04-14",
+  "tools": {
+    "indicator.atr": { "status": "supported", "version": "1.0.0" },
+    "indicator.ema": { "status": "supported", "version": "1.0.0" },
+    "indicator.sma": { "status": "supported", "version": "1.0.0" },
+    "indicator.rsi": { "status": "supported", "version": "1.0.0" },
+    "indicator.adx": { "status": "supported", "version": "1.0.0" },
+    "indicator.vwap": { "status": "supported", "version": "1.0.0" },
+    "indicator.bb": { "status": "supported", "version": "1.0.0" },
+    "indicator.kc": { "status": "supported", "version": "1.0.0" },
+
+    "structure.level_generator": { "status": "supported", "version": "1.0.0" },
+
+    "pattern.triangle_contraction": { "status": "supported", "version": "1.0.0" },
+    "pattern.candlestick": { "status": "supported", "version": "1.0.0" },
+    "pattern.rectangle_range": { "status": "supported", "version": "1.0.0" },
+    "pattern.close_outside_level_zone": { "status": "supported", "version": "1.0.0" },
+    "pattern.breakout_retest_hold": { "status": "supported", "version": "1.0.0" },
+    "pattern.false_breakout": { "status": "supported", "version": "1.0.0" },
+    "pattern.liquidity_sweep": { "status": "supported", "version": "1.0.0" },
+    "pattern.bos": { "status": "supported", "version": "1.0.0" },
+    "pattern.choch": { "status": "supported", "version": "1.0.0" },
+    "pattern.channel": {
+      "status": "planned",
+      "version": null,
+      "reason": "pattern.channel 工具尚未实现",
+      "workaround": "如需趋势通道，可暂用 level_generator + 自定义线段/或等待 tool registry 接入后启用。"
+    },
+    "pattern.flag": {
+      "status": "planned",
+      "version": null,
+      "reason": "pattern.flag 工具尚未实现",
+      "workaround": "可先用 triangle_contraction + candlestick 组合近似，或暂不启用该 pattern。"
+    },
+    "pattern.wedge": {
+      "status": "planned",
+      "version": null,
+      "reason": "pattern.wedge 工具尚未实现",
+      "workaround": "可先用 triangle_contraction 近似，或等待实现。"
+    },
+    "pattern.head_shoulders": {
+      "status": "planned",
+      "version": null,
+      "reason": "pattern.head_shoulders 工具尚未实现",
+      "workaround": "可先用 candlestick + level_generator 做结构化替代，或等待实现。"
+    },
+
+    "action.breakout": { "status": "supported", "version": "1.0.0" },
+    "action.pullback": { "status": "supported", "version": "0.1.0", "notes": "schema 已支持，执行器/工具链后续补齐细节" },
+    "action.mean_reversion": { "status": "supported", "version": "0.1.0", "notes": "schema 已支持，执行器/工具链后续补齐细节" },
+    "action.continuation": { "status": "supported", "version": "0.1.0", "notes": "schema 已支持，执行器/工具链后续补齐细节" },
+    "action.range": { "status": "supported", "version": "0.1.0", "notes": "schema 已支持，执行器/工具链后续补齐细节" },
+
+    "context.htf_bias": { "status": "supported", "version": "0.1.0" },
+    "context.space_filter": { "status": "supported", "version": "0.1.0" },
+    "context.spread_filter": { "status": "supported", "version": "0.1.0" },
+    "context.volatility_regime": { "status": "supported", "version": "0.1.0" },
+    "context.session_filter": { "status": "supported", "version": "0.1.0" },
+
+    "risk.stop_loss.beyond_zone": { "status": "supported", "version": "0.1.0" },
+    "risk.stop_loss.atr_mult": { "status": "supported", "version": "0.1.0" },
+    "risk.stop_loss.structure_point": { "status": "supported", "version": "0.1.0" },
+    "risk.take_profit.rr": { "status": "supported", "version": "0.1.0" },
+    "risk.take_profit.next_level": { "status": "supported", "version": "0.1.0" },
+    "risk.take_profit.hybrid": { "status": "supported", "version": "0.1.0" },
+    "risk.guards": { "status": "supported", "version": "0.1.0" },
+
+    "execution.order_builder": { "status": "supported", "version": "0.1.0" }
+  }
+}

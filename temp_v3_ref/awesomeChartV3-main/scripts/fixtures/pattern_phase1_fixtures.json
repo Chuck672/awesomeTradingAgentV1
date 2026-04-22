@@ -1,0 +1,122 @@
+{
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "rectangle_range_basic",
+      "detectors": [
+        { "type": "rectangle_range", "timeframe": "30m", "lookback_bars": 4, "min_touches_per_side": 2, "tolerance_atr_mult": 0.5 }
+      ],
+      "structures": { "levels": [], "zones": [] },
+      "bars_by_tf": {
+        "30m": [
+          { "time": 1, "open": 100, "high": 110, "low": 100, "close": 105, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 2, "open": 105, "high": 110, "low": 101, "close": 106, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 3, "open": 106, "high": 109.8, "low": 100.2, "close": 102, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 4, "open": 102, "high": 109.9, "low": 100.1, "close": 104, "tick_volume": 100, "delta_volume": 100 }
+        ]
+      },
+      "expect_any_ids": ["rectangle_range"]
+    },
+    {
+      "id": "close_outside_zone_up",
+      "detectors": [{ "type": "close_outside_level_zone", "timeframe": "30m", "close_buffer": 0.0 }],
+      "structures": {
+        "levels": [],
+        "zones": [
+          {
+            "type": "zone",
+            "center": 100,
+            "half_width_pips": 1,
+            "top": 101,
+            "bottom": 99,
+            "from_time": 1,
+            "to_time": 999
+          }
+        ]
+      },
+      "bars_by_tf": {
+        "30m": [{ "time": 1, "open": 102, "high": 103, "low": 99, "close": 103, "tick_volume": 100, "delta_volume": 100 }]
+      },
+      "expect_any_ids": ["close_outside_zone_up"]
+    },
+    {
+      "id": "breakout_retest_hold_up",
+      "detectors": [
+        {
+          "type": "breakout_retest_hold",
+          "timeframe": "30m",
+          "scan_mode": "historical",
+          "lookback_bars": 4,
+          "confirm_mode": "one_body",
+          "confirm_n": 2,
+          "retest_window_bars": 3,
+          "continue_window_bars": 3,
+          "buffer": 0.0,
+          "pullback_margin": 0.0,
+          "max_events": 10
+        }
+      ],
+      "structures": {
+        "levels": [],
+        "zones": [{ "type": "zone", "top": 100, "bottom": 99, "from_time": 1, "to_time": 999, "source_level": { "type": "level", "kind": "range_top", "price": 100, "time": 1 } }]
+      },
+      "bars_by_tf": {
+        "30m": [
+          { "time": 1, "open": 99, "high": 100, "low": 98.5, "close": 99.5, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 2, "open": 100.1, "high": 101.5, "low": 99.9, "close": 101.2, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 3, "open": 101.2, "high": 101.4, "low": 100.0, "close": 100.3, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 4, "open": 100.3, "high": 102.2, "low": 100.2, "close": 101.8, "tick_volume": 100, "delta_volume": 100 }
+        ]
+      },
+      "expect_any_ids": ["breakout_retest_hold_up"]
+    },
+    {
+      "id": "false_breakout_up",
+      "detectors": [{ "type": "false_breakout", "timeframe": "30m", "lookback_bars": 4, "buffer": 0.0 }],
+      "structures": { "levels": [{ "type": "level", "kind": "range_top", "price": 100 }], "zones": [] },
+      "bars_by_tf": {
+        "30m": [
+          { "time": 1, "open": 99, "high": 100, "low": 98.5, "close": 99.5, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 2, "open": 99.5, "high": 101.5, "low": 99.4, "close": 99.8, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 3, "open": 99.8, "high": 100.2, "low": 99.0, "close": 99.6, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 4, "open": 99.6, "high": 100.1, "low": 99.2, "close": 99.7, "tick_volume": 100, "delta_volume": 100 }
+        ]
+      },
+      "expect_any_ids": ["false_breakout_up"]
+    },
+    {
+      "id": "liquidity_sweep_up_recover",
+      "detectors": [{ "type": "liquidity_sweep", "timeframe": "30m", "lookback_bars": 5, "buffer": 0.0, "recover_within_bars": 2 }],
+      "structures": { "levels": [{ "type": "level", "kind": "swing_high", "price": 100 }], "zones": [] },
+      "bars_by_tf": {
+        "30m": [
+          { "time": 1, "open": 99.0, "high": 99.8, "low": 98.7, "close": 99.5, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 2, "open": 99.5, "high": 100.8, "low": 99.4, "close": 100.6, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 3, "open": 100.6, "high": 101.2, "low": 99.6, "close": 99.7, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 4, "open": 99.7, "high": 100.0, "low": 99.2, "close": 99.5, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 5, "open": 99.5, "high": 99.9, "low": 99.0, "close": 99.3, "tick_volume": 100, "delta_volume": 100 }
+        ]
+      },
+      "expect_any_ids": ["liquidity_sweep_up_recover"]
+    },
+    {
+      "id": "bos_up",
+      "detectors": [{ "type": "bos", "timeframe": "30m", "lookback_bars": 9, "pivot_left": 1, "pivot_right": 1, "buffer": 0.0 }],
+      "structures": { "levels": [], "zones": [] },
+      "bars_by_tf": {
+        "30m": [
+          { "time": 1, "open": 100, "high": 101, "low": 99, "close": 100.5, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 2, "open": 100.5, "high": 102, "low": 100, "close": 101.8, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 3, "open": 101.8, "high": 101.9, "low": 100.7, "close": 101.0, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 4, "open": 101.0, "high": 103.2, "low": 100.9, "close": 103.0, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 5, "open": 103.0, "high": 103.1, "low": 101.4, "close": 101.8, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 6, "open": 101.8, "high": 104.0, "low": 101.6, "close": 103.6, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 7, "open": 103.6, "high": 103.7, "low": 102.0, "close": 102.5, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 8, "open": 102.5, "high": 104.2, "low": 102.4, "close": 104.0, "tick_volume": 100, "delta_volume": 100 },
+          { "time": 9, "open": 104.0, "high": 105.5, "low": 103.8, "close": 105.2, "tick_volume": 100, "delta_volume": 100 }
+        ]
+      },
+      "expect_any_ids": ["bos_up"]
+    }
+  ]
+}

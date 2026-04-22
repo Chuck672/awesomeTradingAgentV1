@@ -1,0 +1,15 @@
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+websockets==12.0
+pandas==2.2.1
+numpy==1.26.4
+SQLAlchemy==2.0.29
+duckdb==1.0.0
+python-multipart==0.0.9
+pyzmq==26.0.3
+
+# Agent & AI dependencies
+langgraph>=0.2.0
+langchain-openai>=0.1.0
+langgraph-checkpoint-sqlite>=2.0.0
+aiosqlite>=0.20.0
