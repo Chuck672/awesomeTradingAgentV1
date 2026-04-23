@@ -120,6 +120,7 @@ export function RightPanel(props: {
             symbol={symbol || "XAUUSD"}
             timeframe={timeframe || "M15"}
             onExecuteActions={(actions) => (onAiExecuteActions ? onAiExecuteActions(actions) : [])}
+            onCaptureScreenshot={onRequestScreenshot}
           />
         )}
         {panel === "chat" && <ChatStrategyPanel />}

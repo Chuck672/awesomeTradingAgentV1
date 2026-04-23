@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Settings, Play, Send, X, Plug, Trash2 } from "lucide-react";
+import { Settings, Play, Send, X, Plug, Trash2, Square, Camera } from "lucide-react";
 import { getBaseUrl } from "@/lib/api";
 
 type AgentConfig = {
@@ -72,6 +72,7 @@ export function AgentAdvisorPanel(props: {
   symbol: string;
   timeframe: string;
   onExecuteActions: (actions: any[]) => Promise<string[]> | string[];
+  onCaptureScreenshot?: () => Promise<string | null> | (string | null);
 }) {
   const [settings, setSettings] = useState<AiSettings | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -79,6 +80,7 @@ export function AgentAdvisorPanel(props: {
   const [running, setRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string>("");
   const [inputText, setInputText] = useState("");
+  const [includeScreenshot, setIncludeScreenshot] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   
   const MSG_KEY = "awesome_trading_agent_messages_v1";
@@ -228,6 +230,19 @@ export function AgentAdvisorPanel(props: {
     setRunning(true);
     if (!overrideMessage) setInputText("");
     
+    let imageData: string | null = null;
+    if (includeScreenshot && props.onCaptureScreenshot) {
+      try {
+        const dataUrl = await props.onCaptureScreenshot();
+        if (dataUrl) {
+          imageData = dataUrl;
+        }
+      } catch (e) {
+        console.error("Failed to capture screenshot:", e);
+      }
+      setIncludeScreenshot(false); // Reset after sending
+    }
+
     // Add user message to UI
     setMessages(prev => {
       const newMsgs = [
@@ -236,7 +251,7 @@ export function AgentAdvisorPanel(props: {
           id: Date.now().toString(),
           agent: "user",
           status: "idle" as AgentStatus,
-          content: msgToSent,
+          content: msgToSent + (imageData ? "\n[Attached Chart Screenshot]" : ""),
           time: new Date().toLocaleTimeString()
         }
       ];
@@ -261,13 +276,34 @@ export function AgentAdvisorPanel(props: {
             supervisor: settings.supervisor,
             analyzer: settings.analyzer,
             executor: settings.executor,
-          }
+          },
+          image_data: imageData
         })
       });
       if (!res.ok) throw new Error("Failed to trigger agent");
     } catch (e) {
       console.error(e);
       setRunning(false);
+    }
+  };
+
+  const stopAgent = async () => {
+    if (!sessionId) return;
+    
+    try {
+      const res = await fetch(apiUrl("/api/agent/cancel_decision"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      
+      if (res.ok) {
+        setRunning(false);
+      } else {
+        console.error("Failed to cancel agent workflow.");
+      }
+    } catch (e) {
+      console.error("Error cancelling agent:", e);
     }
   };
 
@@ -462,21 +498,40 @@ export function AgentAdvisorPanel(props: {
             disabled={running}
           />
           <Button 
+            variant="outline"
+            className={`px-3 border-white/10 transition-colors ${
+              includeScreenshot 
+                ? "bg-[#00bfa5]/20 text-[#00bfa5] border-[#00bfa5]/50" 
+                : "hover:bg-white/5 text-gray-400"
+            }`}
+            onClick={() => setIncludeScreenshot(!includeScreenshot)}
+            disabled={running || !props.onCaptureScreenshot}
+            title="Attach Chart Screenshot"
+          >
+            <Camera size={16} />
+          </Button>
+          <Button 
             className="bg-[#00bfa5] hover:bg-[#00bfa5]/80 text-black px-3"
             onClick={() => triggerDecision()}
-            disabled={running || !inputText.trim()}
+            disabled={running || (!inputText.trim() && !includeScreenshot)}
           >
             <Send size={16} />
           </Button>
         </div>
         <Button 
           variant="outline"
-          className="w-full border-white/10 hover:bg-white/5 text-gray-300 text-xs flex items-center justify-center gap-2"
-          onClick={() => triggerDecision("Please analyze the current market context and execute necessary actions.")}
-          disabled={running}
+          className={`w-full text-xs flex items-center justify-center gap-2 ${
+            running 
+              ? "border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300" 
+              : "border-white/10 hover:bg-white/5 text-gray-300"
+          }`}
+          onClick={() => running ? stopAgent() : triggerDecision("Please analyze the current market context and execute necessary actions.")}
         >
           {running ? (
-            <span className="animate-pulse">AI is working...</span>
+            <>
+              <Square size={14} className="fill-current" />
+              Stop AI Agent
+            </>
           ) : (
             <>
               <Play size={14} />

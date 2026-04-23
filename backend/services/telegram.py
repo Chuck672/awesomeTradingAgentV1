@@ -23,10 +23,32 @@ def send_telegram_message(*, bot_token: str, chat_id: str, text: str, timeout_se
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
     ctx = ssl.create_default_context()
-    with urllib.request.urlopen(req, timeout=timeout_sec, context=ctx) as resp:
-        raw = resp.read().decode("utf-8", errors="replace")
-        j = json.loads(raw)
-        if isinstance(j, dict) and j.get("ok") and isinstance(j.get("result"), dict):
-            return str(j["result"].get("message_id") or "")
+    
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_sec, context=ctx) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            j = json.loads(raw)
+            if isinstance(j, dict) and j.get("ok") and isinstance(j.get("result"), dict):
+                return str(j["result"].get("message_id") or "")
+    except urllib.error.HTTPError as e:
+        # If it's a 400 Bad Request, it's almost certainly a Markdown parsing error.
+        # Fallback to plain text.
+        if e.code == 400:
+            print(f"[TELEGRAM] Markdown parsing failed (HTTP 400), falling back to plain text...")
+            payload["parse_mode"] = "" # Remove parse_mode
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(url, data=data, method="POST")
+            req.add_header("Content-Type", "application/json")
+            try:
+                with urllib.request.urlopen(req, timeout=timeout_sec, context=ctx) as resp:
+                    raw = resp.read().decode("utf-8", errors="replace")
+                    j = json.loads(raw)
+                    if isinstance(j, dict) and j.get("ok") and isinstance(j.get("result"), dict):
+                        return str(j["result"].get("message_id") or "")
+            except Exception as e2:
+                print(f"[TELEGRAM] Plain text fallback also failed: {e2}")
+                raise e2
+        else:
+            raise e
     return None
 

@@ -2370,9 +2370,9 @@ export function TradingChart() {
                         updateActiveChart({ timeframe: tf });
                         out.push(`set_timeframe ${tf}`);
                       }
-                    } else if (t === "chart_toggle_indicator") {
+                    } else if (t === "chart_toggle_indicator" || t === "indicator_toggle") {
                       const id = String(a?.id || "");
-                      const enabled = !!a?.enabled;
+                      const enabled = a?.visible !== undefined ? !!a?.visible : !!a?.enabled;
                       if (id === "svp") updateActiveChart({ showSVP: enabled });
                       else if (id === "vrvp") updateActiveChart({ showVRVP: enabled });
                       else if (id === "bubble") updateActiveChart({ showBubble: enabled });
@@ -2385,7 +2385,7 @@ export function TradingChart() {
                       else if (id === "ATR") updateActiveChart({ showIndB_ATR: enabled });
                       else if (id === "Zigzag") updateActiveChart({ showIndB_Zigzag: enabled });
                       out.push(`toggle ${id}=${enabled ? "on" : "off"}`);
-                    } else if (t === "chart_clear_all_indicators") {
+                    } else if (t === "chart_clear_all_indicators" || t === "indicator_clear_all") {
                       updateActiveChart({
                         showSVP: false,
                         showVRVP: false,
@@ -2400,9 +2400,12 @@ export function TradingChart() {
                         showIndB_Zigzag: false,
                       });
                       out.push("clear_all_indicators");
-                    } else if (t === "chart_clear_drawings") {
+                    } else if (t === "chart_clear_drawings" || t === "draw_clear_all") {
                       chartRefs.current[activeChartId]?.removeAllDrawings();
                       out.push("clear_drawings");
+                    } else if (t === "draw_remove_object") {
+                      chartRefs.current[activeChartId]?.removeDrawing?.(a?.id);
+                      out.push(`remove_drawing ${a?.id}`);
                     } else if (t === "chart_take_screenshot") {
                       chartRefs.current[activeChartId]?.takeScreenshot();
                       out.push("screenshot");
@@ -2412,11 +2415,29 @@ export function TradingChart() {
                         chartRefs.current[activeChartId]?.scrollToTime(time);
                         out.push(`scroll_to ${Math.floor(time)}`);
                       }
-                    } else if (t === "chart_start_replay_at_time") {
-                      const time = Number(a?.time);
+                    } else if (t === "chart_start_replay_at_time" || t === "chart_replay_start") {
+                      const time = Number(a?.start_time || a?.time);
                       if (Number.isFinite(time)) {
                         chartRefs.current[activeChartId]?.startReplayAtTime(time);
                         out.push(`replay_at ${Math.floor(time)}`);
+                      }
+                    } else if (t === "chart_replay_control") {
+                      const action = String(a?.action || "");
+                      if (action === "play") {
+                        setTimeout(() => chartRefs.current[activeChartId]?.setPlaying?.(true), 0);
+                        out.push("play");
+                      } else if (action === "pause") {
+                        chartRefs.current[activeChartId]?.setPlaying?.(false);
+                        out.push("pause");
+                      } else if (action === "stop") {
+                        chartRefs.current[activeChartId]?.stopReplay();
+                        out.push("stop_replay");
+                      }
+                      if (a?.speed !== undefined) {
+                        const mul = Math.max(1, Math.min(20, Number(a.speed)));
+                        const ms = Math.max(50, Math.round(1000 / mul));
+                        chartRefs.current[activeChartId]?.setReplaySpeed(ms);
+                        out.push(`set_replay_speed ${mul}x`);
                       }
                     } else if (t === "chart_set_replay_speed") {
                       const mul = Math.max(1, Math.min(20, Number(a?.speed_multiplier || 1)));
@@ -2451,7 +2472,7 @@ export function TradingChart() {
                     } else if (t === "chart_clear_ai_overlays") {
                       (chartRefs.current[activeChartId] as any)?.removeAiOverlays?.();
                       out.push("clear_ai_overlays");
-                    } else if (t === "chart_draw") {
+                    } else if (t === "chart_draw" || t === "draw_objects") {
                       const objs = Array.isArray(a?.objects) ? a.objects : [];
                       // drawObjects 可能需要确保历史数据覆盖到标注时间点，因此支持 async
                       await (chartRefs.current[activeChartId] as any)?.drawObjects?.(objs);

@@ -38,9 +38,11 @@ export class Renderer {
 
   setFullData(data: TrendExhaustionData[]) {
     this.fullData = data;
+    this.clearCache();
   }
 
   clearCache() {
+    this.lastDataLength = -1;
     this.computedData = { boxes: [], shapes: [] };
   }
 

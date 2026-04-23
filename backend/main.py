@@ -29,10 +29,12 @@ async def lifespan(app: FastAPI):
     active_broker = app_config.get_active_broker()
     if active_broker:
         print(f"Connecting to active broker: {active_broker['server']}")
-        mt5_source.connect_broker(
-            server=active_broker['server'],
-            login=active_broker['login'],
-            path=active_broker['path']
+        # Run synchronous connect_broker in a separate thread to prevent blocking the asyncio event loop
+        await asyncio.to_thread(
+            mt5_source.connect_broker,
+            active_broker['server'],
+            active_broker['login'],
+            active_broker['path']
         )
         
     await mt5_source.start()

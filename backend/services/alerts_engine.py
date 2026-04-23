@@ -35,7 +35,7 @@ def _safe_int(x: Any, default: int = 0) -> int:
         return default
 
 
-from backend.services.chart_scene.indicators import calc_raja_sr, calc_msb_zigzag
+from backend.services.chart_scene.indicators import calc_raja_sr, calc_msb_zigzag, calc_trend_exhaustion
 from backend.api.agent_routes import run_agent_workflow
 import uuid
 
@@ -45,68 +45,96 @@ def _get_active_symbols() -> List[str]:
     # If ingestion_service isn't fully tracking it this way, we can also query the DB
     return ["EURUSD"] # Fallback or dynamic fetch
 
-def eval_ai_agent_triggers(rule: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
-    """
-    rule:
-      {
-        "type": "ai_agent_trigger",
-        "symbol": "EURUSD",
-        "timeframe": "M15",
-        "enable_raja_sr": True,
-        "enable_msb": True,
-        "agent_configs": {...} # Agent configurations
-      }
-    """
+def eval_raja_sr_touch(rule: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
     symbol = str(rule.get("symbol") or "").strip()
     timeframe = str(rule.get("timeframe") or "").strip()
-    if not symbol or not timeframe:
-        return None
+    cooldown_minutes = _safe_int(rule.get("cooldown_minutes", 30))
+    if not symbol or not timeframe: return None
 
     bars = historical_service.get_history(symbol, timeframe, before_time=0, limit=400)
-    if not bars or len(bars) < 50:
-        return None
+    if not bars or len(bars) < 50: return None
+        
+    last_bar = bars[-1]
+    last_close = _safe_float(last_bar.get("close"))
+    
+    zones = calc_raja_sr(bars, max_zones=5)
+    last_raja_trigger = state.get("last_trigger_ts", 0)
+    
+    if (int(time.time()) - last_raja_trigger) > cooldown_minutes * 60:
+        for zone in zones:
+            if zone["bottom"] <= last_close <= zone["top"]:
+                state["last_trigger_ts"] = int(time.time())
+                return f"RajaSR Trigger: {symbol} ({timeframe}) Price {last_close} entered {zone['type']} zone ({zone['bottom']:.2f} - {zone['top']:.2f})"
+    return None
+
+def eval_msb_zigzag_break(rule: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
+    symbol = str(rule.get("symbol") or "").strip()
+    timeframe = str(rule.get("timeframe") or "").strip()
+    detect_bos = rule.get("detect_bos", True)
+    detect_choch = rule.get("detect_choch", True)
+    if not symbol or not timeframe: return None
+
+    bars = historical_service.get_history(symbol, timeframe, before_time=0, limit=400)
+    if not bars or len(bars) < 50: return None
         
     last_bar = bars[-1]
     last_t = _safe_int(last_bar.get("time"))
-    last_close = _safe_float(last_bar.get("close"))
     
-    # 1. Check MSB ZigZag (No cooldown)
-    if rule.get("enable_msb"):
-        # We need swings to calculate MSB
-        from backend.services.chart_scene.indicators import detect_swings, structure_state_from_swings
-        highs = [float(b["high"]) for b in bars]
-        lows = [float(b["low"]) for b in bars]
-        swings = detect_swings(highs, lows, 5)
-        state_msb = structure_state_from_swings(swings, last_close)
+    msb_res = calc_msb_zigzag(bars)
+    lines = msb_res.get("lines", [])
+    if not lines: return None
+    
+    latest_line = lines[-1]
+    # Check if the break happened exactly on the last bar
+    if latest_line["time"] == last_t:
+        # Check if we already triggered for this exact bar
+        if state.get("last_triggered_bar_time") == last_t:
+            return None
+            
+        ltype = latest_line["type"] # e.g. "BoS Bull", "ChoCh Bear"
+        is_bos = "BoS" in ltype
+        is_choch = "ChoCh" in ltype
         
-        # If there's a recent BOS or CHOCH on the last bar
-        last_break = state.get("last_msb_break_time", 0)
-        # Simplified check: if current trend just changed or a level was broken recently
-        # For a real implementation, we'd check if the break happened exactly on `last_t`
-        # Let's simulate a trigger if close breaks the last swing high/low
-        if len(swings) >= 2:
-            last_swing = swings[-1]
-            if last_t != last_break:
-                if (last_swing["type"] == "High" and last_close > last_swing["price"]) or \
-                   (last_swing["type"] == "Low" and last_close < last_swing["price"]):
-                    
-                    state["last_msb_break_time"] = last_t
-                    return f"MSB Trigger: Price {last_close} broke structure at {last_swing['price']}"
-
-    # 2. Check RajaSR (30 min cooldown)
-    if rule.get("enable_raja_sr"):
-        zones = calc_raja_sr(bars, max_zones=5)
-        last_raja_trigger = state.get("last_raja_trigger_time", 0)
-        
-        # 30 minute cooldown = 1800 seconds
-        if (int(time.time()) - last_raja_trigger) > 1800:
-            for zone in zones:
-                # If price is inside or very close to the zone
-                if zone["bottom"] <= last_close <= zone["top"]:
-                    state["last_raja_trigger_time"] = int(time.time())
-                    return f"RajaSR Trigger: Price {last_close} entered {zone['type']} zone ({zone['bottom']} - {zone['top']})"
-
+        if (is_bos and detect_bos) or (is_choch and detect_choch):
+            state["last_triggered_bar_time"] = last_t
+            return f"MSB_ZigZag Trigger: {symbol} ({timeframe}) detected {ltype} at price {latest_line['level']:.2f}"
+            
     return None
+
+def eval_trend_exhaustion(rule: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
+    symbol = str(rule.get("symbol") or "").strip()
+    timeframe = str(rule.get("timeframe") or "").strip()
+    if not symbol or not timeframe: return None
+
+    bars = historical_service.get_history(symbol, timeframe, before_time=0, limit=400)
+    if not bars or len(bars) < 50: return None
+        
+    last_bar = bars[-1]
+    last_t = _safe_int(last_bar.get("time"))
+    
+    te = calc_trend_exhaustion(bars)
+    
+    # We want to trigger when the triangle appears. 
+    # A triangle appears when it transitions from overbought to not-overbought (ob_reversal)
+    # or oversold to not-oversold (os_reversal).
+    ob_reversal = te.get("ob_reversal", False)
+    os_reversal = te.get("os_reversal", False)
+    
+    # Check if we already triggered for this exact bar
+    if state.get("last_triggered_bar_time") == last_t:
+        return None
+    
+    if ob_reversal:
+        state["last_triggered_bar_time"] = last_t
+        return f"Trend Exhaustion Trigger: {symbol} ({timeframe}) Bearish Triangle (Overbought Reversal) appeared at close {_safe_float(last_bar.get('close')):.2f}"
+    
+    if os_reversal:
+        state["last_triggered_bar_time"] = last_t
+        return f"Trend Exhaustion Trigger: {symbol} ({timeframe}) Bullish Triangle (Oversold Reversal) appeared at close {_safe_float(last_bar.get('close')):.2f}"
+        
+    return None
+
+def eval_london_break_asia_high_volume(rule: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
     """
     rule:
       {
@@ -193,24 +221,45 @@ def eval_once() -> None:
             msg = eval_london_break_asia_high_volume(rule, state)
         
         # New AI Agent Event Triggers
-        elif typ == "ai_agent_trigger":
-            msg = eval_ai_agent_triggers(rule, state)
-            if msg:
-                # If triggered, spin up a background agent workflow!
-                configs = rule.get("agent_configs", {})
-                session_id = f"evt_{aid}_{uuid.uuid4().hex[:8]}"
-                # Because we're in sync code right now, we can run it via asyncio create_task
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(run_agent_workflow(session_id, f"Auto-triggered event: {msg}. Please analyze context and execute.", configs))
-                except Exception as e:
-                    pass
+        elif typ == "raja_sr_touch":
+            msg = eval_raja_sr_touch(rule, state)
+        elif typ == "msb_zigzag_break":
+            msg = eval_msb_zigzag_break(rule, state)
+        elif typ == "trend_exhaustion":
+            msg = eval_trend_exhaustion(rule, state)
         else:
             continue
 
         if msg:
             append_event(aid, msg)
-            # telegram (optional)
+            
+            # If it's an AI Agent Trigger, spin up a background agent workflow!
+            if typ in ["raja_sr_touch", "msb_zigzag_break", "trend_exhaustion"]:
+                configs = rule.get("agent_configs", {})
+                initial_prompt = configs.get("initial_prompt", f"Auto-triggered event: {msg}. Please analyze context and execute.")
+                session_id = f"evt_{aid}_{uuid.uuid4().hex[:8]}"
+                
+                # telegram (optional)
+                tg = rule.get("telegram") if isinstance(rule.get("telegram"), dict) else {}
+                token = str(tg.get("token") or "")
+                chat_id = str(tg.get("chat_id") or "")
+                telegram_config = tg if token and chat_id else None
+                
+                try:
+                    loop_obj = asyncio.get_running_loop()
+                    loop_obj.create_task(run_agent_workflow(
+                        session_id=session_id, 
+                        initial_message=initial_prompt, 
+                        configs=configs,
+                        symbol=rule.get("symbol", "XAUUSD"),
+                        timeframe=rule.get("timeframe", "M15"),
+                        alert_id=aid,
+                        telegram_config=telegram_config
+                    ))
+                except Exception as e:
+                    pass
+
+            # send initial telegram alert right away if configured
             tg = rule.get("telegram") if isinstance(rule.get("telegram"), dict) else {}
             token = str(tg.get("token") or "")
             chat_id = str(tg.get("chat_id") or "")

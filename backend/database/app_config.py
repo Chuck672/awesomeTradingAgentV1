@@ -1,4 +1,21 @@
 import sqlite3
+import contextlib
+import time
+
+@contextlib.contextmanager
+def get_db_conn(db_path):
+    for _ in range(10):
+        try:
+            with contextlib.closing(sqlite3.connect(db_path, timeout=30.0)) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                yield conn
+            return
+        except sqlite3.OperationalError as e:
+            if "unable to open database file" in str(e) or "database is locked" in str(e):
+                time.sleep(0.1)
+            else:
+                raise
+    raise sqlite3.OperationalError(f"Failed to open {db_path} after 10 retries")
 import json
 from typing import List, Dict, Optional
 import os
@@ -16,7 +33,11 @@ class AppConfigStore:
         self.base_dir = self._get_default_base_dir()
         os.makedirs(self.base_dir, exist_ok=True)
         self.db_path = os.path.join(self.base_dir, "app_config.sqlite")
+
         self._init_db()
+
+
+
 
     def _get_default_base_dir(self) -> str:
         """Calculate the OS-specific application data directory."""
@@ -49,7 +70,7 @@ class AppConfigStore:
         return brokers_dir
 
     def _init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             # Table for configured brokers
             cursor.execute("""
@@ -71,7 +92,7 @@ class AppConfigStore:
         safe_server = "".join([c if c.isalnum() else "_" for c in server])
         broker_id = f"{safe_server}_{safe_login}"
         
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO brokers (id, server, login, path, is_active)
@@ -87,7 +108,7 @@ class AppConfigStore:
 
     def set_active_broker(self, broker_id: str):
         """Set a specific broker as active, deactivate others."""
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("UPDATE brokers SET is_active = 0")
             cursor.execute("UPDATE brokers SET is_active = 1 WHERE id = ?", (broker_id,))
@@ -95,7 +116,7 @@ class AppConfigStore:
 
     def get_active_broker(self) -> Optional[Dict]:
         """Get the currently active broker configuration."""
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id, server, login, path FROM brokers WHERE is_active = 1")
             row = cursor.fetchone()
@@ -110,7 +131,7 @@ class AppConfigStore:
             
     def get_all_brokers(self) -> List[Dict]:
         """Get all configured brokers."""
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id, server, login, path, is_active FROM brokers")
             rows = cursor.fetchall()

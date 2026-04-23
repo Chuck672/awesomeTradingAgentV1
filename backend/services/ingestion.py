@@ -24,6 +24,7 @@ class IngestionService:
         self._flush_task = None
         self._is_running = False
         self.active_progress: Dict[tuple, Dict[str, Any]] = {}
+        self._reconciled: set = set()  # 记录已完成断点续传的 (symbol, timeframe)，防止实时数据覆盖缺口
 
     async def _publish_progress(self, symbol: str, timeframe: str, progress: int, status: str, message: str):
         self.active_progress[(symbol, timeframe)] = {
@@ -113,7 +114,9 @@ class IngestionService:
                 latest_times[key] = b['time']
                 
         for (symbol, tf), time in latest_times.items():
-            sqlite_manager.update_sync_state(symbol, tf, time)
+            # 只有当该品种的断点续传（对账）已经完成时，才允许用实时 Tick 去刷新 last_sync，避免固化缺口
+            if (symbol, tf) in self._reconciled:
+                sqlite_manager.update_sync_state(symbol, tf, time)
             
         # Check if there are active background syncs that we should publish progress for
         # Since this is called frequently, we can optionally broadcast that we are "live syncing"
@@ -160,6 +163,19 @@ class IngestionService:
         def ts_to_dt(ts: int) -> datetime:
             return datetime.fromtimestamp(ts, tz=timezone.utc)
             
+        # [Probe] 发送 H1 探针，检查 MT5 是否真的准备好了历史数据
+        probe_start = current_time - 24 * 3600
+        probe_tf = mt5.TIMEFRAME_H1
+        probe_retries = 0
+        while probe_retries < 10:
+            probe_rates = await asyncio.to_thread(mt5.copy_rates_range, symbol, probe_tf, ts_to_dt(probe_start), ts_to_dt(current_time))
+            if probe_rates is not None and len(probe_rates) > 0:
+                logger.info(f"MT5 Readiness probe succeeded for {symbol} (H1 data available)")
+                break
+            logger.warning(f"MT5 probe failed/empty for {symbol}, waiting for terminal to connect and download history... ({probe_retries+1}/10)")
+            await asyncio.sleep(3)
+            probe_retries += 1
+            
         if not last_sync:
             logger.info(f"Initial sync for {symbol} {timeframe} (Last 3 months)")
             start_time = current_time - (90 * 24 * 3600)
@@ -171,6 +187,7 @@ class IngestionService:
                 await sqlite_manager.upsert_bars(bars)
                 sqlite_manager.update_sync_state(symbol, timeframe, int(rates[-1]['time']))
                 logger.info(f"Initial sync: inserted {len(bars)} bars for {symbol} {timeframe}")
+                self._reconciled.add((symbol, timeframe))
             else:
                 err = mt5.last_error()
                 logger.warning(f"copy_rates_range failed or returned empty for {symbol} {timeframe}. Error: {err}")
@@ -182,6 +199,7 @@ class IngestionService:
                     sqlite_manager.update_sync_state(symbol, timeframe, int(rates[-1]['time']))
                     logger.info(f"Initial sync (fallback): inserted {len(bars)} bars for {symbol} {timeframe}")
                     start_time = int(rates[0]['time'])
+                    self._reconciled.add((symbol, timeframe))
                 else:
                     logger.error(f"Initial sync complete failure for {symbol} {timeframe}. Error: {mt5.last_error()}")
                 
@@ -200,10 +218,15 @@ class IngestionService:
                     await sqlite_manager.upsert_bars(bars)
                     sqlite_manager.update_sync_state(symbol, timeframe, int(rates[-1]['time']))
                     logger.info(f"Caught up {len(bars)} bars for {symbol} {timeframe}")
+                    self._reconciled.add((symbol, timeframe))
+                    logger.info(f"Reconciliation marked as complete for {symbol} {timeframe}")
                 else:
                     logger.error(f"Catch-up failed: mt5.copy_rates_range returned None or empty for {symbol} {timeframe}. Error: {mt5.last_error()}")
                 
                 await self._publish_progress(symbol, timeframe, 100, "completed", "Catch-up completed")
+            else:
+                self._reconciled.add((symbol, timeframe))
+                logger.info(f"No catch-up needed. Reconciliation marked as complete for {symbol} {timeframe}")
 
         # Background historical fetch resumption
         if last_sync:
@@ -227,7 +250,7 @@ class IngestionService:
             else:
                 sqlite_manager.update_archive_state(symbol, f"{timeframe}_sync_completed", "true")
                 await self._publish_progress(symbol, timeframe, 100, "completed", f"{timeframe} fully synced")
-
+                
     async def _background_historical_fetch(self, symbol: str, timeframe: str, end_time: int):
         """
         后台静默拉取过去 36 个月的数据并存入 SQLite。
@@ -320,5 +343,84 @@ class IngestionService:
             "MN1": mt5.TIMEFRAME_MN1, "MN": mt5.TIMEFRAME_MN1,
         }
         return mapping.get(tf_str)
+
+    async def check_and_repair_gaps(self, symbol: str, timeframe: str, days_lookback: int = 15) -> Dict[str, Any]:
+        """
+        深度扫描本地 SQLite 数据，寻找大缺口（> 5 倍 timeframe）并向 MT5 自动回补。
+        主要用于通过用户 UI 手动触发深度修复。
+        """
+        if not MT5_AVAILABLE:
+            return {"status": "error", "message": "MT5 not available"}
+            
+        deps = get_current_broker_deps()
+        if not deps:
+            return {"status": "error", "message": "No active broker"}
+            
+        sqlite_manager = deps['sqlite_manager']
+        mt5_tf = self._get_mt5_timeframe(timeframe)
+        if mt5_tf is None:
+            return {"status": "error", "message": "Invalid timeframe"}
+            
+        current_time = int(datetime.now().timestamp())
+        start_scan_time = current_time - (days_lookback * 24 * 3600)
+        
+        # 1. 读取近期的数据时间戳
+        try:
+            with __import__('sqlite3').connect(sqlite_manager.db_path) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT time FROM ohlcv WHERE symbol = ? AND timeframe = ? AND time >= ? ORDER BY time ASC", 
+                            (symbol, timeframe, start_scan_time))
+                times = [row[0] for row in cur.fetchall()]
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+            
+        if not times:
+            return {"status": "error", "message": "No local data to scan"}
+            
+        tf_seconds = self._tf_to_seconds(timeframe)
+        gap_threshold = tf_seconds * 5  # 超过 5 根 K 线算缺口
+        
+        gaps_found = 0
+        bars_recovered = 0
+        
+        await self._publish_progress(symbol, timeframe, 0, "syncing", f"Scanning {days_lookback} days for gaps...")
+        
+        # 2. 遍历找缺口并回补
+        for i in range(1, len(times)):
+            diff = times[i] - times[i-1]
+            if diff > gap_threshold:
+                gap_start = times[i-1]
+                gap_end = times[i]
+                
+                # 可能是正常的周末停盘，没关系，直接问 MT5 要数据
+                # 如果 MT5 确实返回了中间的 K 线，那就说明这是真缺口
+                dt_start = datetime.fromtimestamp(gap_start, tz=timezone.utc)
+                dt_end = datetime.fromtimestamp(gap_end, tz=timezone.utc)
+                
+                rates = await asyncio.to_thread(mt5.copy_rates_range, symbol, mt5_tf, dt_start, dt_end)
+                
+                if rates is not None and len(rates) > 2: # 如果只有2根，说明只有收尾，没有中间数据
+                    # 我们拿到缺失的数据了！
+                    bars = self._format_rates(rates, symbol, timeframe, "gap_repair")
+                    await sqlite_manager.upsert_bars(bars)
+                    gaps_found += 1
+                    bars_recovered += (len(bars) - 2)
+                    logger.info(f"Gap Repaired for {symbol} {timeframe}: {dt_start} to {dt_end}, recovered {len(bars)-2} bars")
+                    
+            # Update progress periodically
+            if i % 5000 == 0:
+                pct = int((i / len(times)) * 100)
+                await self._publish_progress(symbol, timeframe, pct, "syncing", f"Scanning gaps... {pct}%")
+                
+        await self._publish_progress(symbol, timeframe, 100, "completed", f"Gap repair done: {gaps_found} gaps, {bars_recovered} bars")
+        
+        # 通知 Alert Engine 刷新缓存 (如果存在的话)
+        # 这通过 SYNC_PROGRESS 的 completed 状态自动触发了 alerts_engine._on_sync_progress
+        
+        return {
+            "status": "success",
+            "gaps_repaired": gaps_found,
+            "bars_recovered": bars_recovered
+        }
 
 ingestion_service = IngestionService()

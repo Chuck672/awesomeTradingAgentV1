@@ -32,7 +32,7 @@ from backend.services.strategy.compile_v2_to_ir import compile_schema_v2_to_ir
 from backend.services.strategy.executor_v1 import execute_ir_v1
 from backend.services.ai.chart_tools import tool_schemas as ai_tool_schemas, system_prompt as ai_system_prompt, parse_tool_calls as ai_parse_tool_calls
 from backend.services.watchlist_store import list_watchlist, add_symbol as watchlist_add_symbol, remove_symbol as watchlist_remove_symbol
-from backend.services.alerts_store import list_alerts as alerts_list, create_alert as alerts_create, delete_alert as alerts_delete, set_enabled as alerts_set_enabled, list_events as alerts_list_events
+from backend.services.alerts_store import list_alerts as alerts_list, create_alert as alerts_create, delete_alert as alerts_delete, set_enabled as alerts_set_enabled, list_events as alerts_list_events, list_ai_reports as alerts_list_reports
 from backend.data_sources.mt5_source import MT5_AVAILABLE, mt5_source
 from backend.services.chart_scene import scene_engine, SceneParams
 import json
@@ -2654,6 +2654,10 @@ async def api_alerts_list():
 @router.get("/alerts/events")
 async def api_alerts_events(limit: int = Query(100)):
     return {"events": alerts_list_events(int(limit))}
+
+@router.get("/alerts/reports")
+async def api_alerts_reports(limit: int = Query(50)):
+    return {"reports": alerts_list_reports(int(limit))}
 
 
 @router.post("/alerts/create")

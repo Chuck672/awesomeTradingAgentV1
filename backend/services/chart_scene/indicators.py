@@ -245,41 +245,78 @@ def calc_volume_profile(bars: List[Dict[str, Any]], bins_count: int = 50, value_
         "valueAreaHigh": bins[up_idx - 1]["yEnd"] if up_idx < bins_count else bins[-1]["yEnd"]
     }
 
-def calc_raja_sr(bars: List[Dict[str, Any]], lookback: int = 400, pivot: int = 5, max_zones: int = 5) -> List[Dict[str, Any]]:
-    # Simplified RajaSR (Support/Resistance clustering)
+def calc_raja_sr(bars: List[Dict[str, Any]], lookback: int = 1000, pivot: int = 2, max_zones: int = 6) -> List[Dict[str, Any]]:
+    # Advanced RajaSR (Trade Mode Logic ported from frontend)
     bars = bars[-lookback:]
     if len(bars) < 50:
         return []
-    
+        
+    def get_median(xs):
+        import math
+        xs = [x for x in xs if not math.isnan(x)]
+        if not xs: return 0.0
+        return float(np.median(xs))
+
+    recent_bars = bars[-200:]
     trs = []
-    for b in bars[-200:]:
-        h, l = float(b["high"]), float(b["low"])
-        if h > l: trs.append(h - l)
+    for b in recent_bars:
+        h, l = float(b.get("high", 0)), float(b.get("low", 0))
+        if h > 0 and l > 0 and h > l:
+            trs.append(h - l)
+            
+    tr_med = max(get_median(trs), 1e-6)
     
-    if not trs: return []
-    med_tr = float(np.median(trs))
-    tol = max(med_tr * 0.5, 1e-6)
-    wick_min = max(med_tr * 0.25, 1e-6)
+    tol_tr_mult = 0.20
+    margin_tr_mult = 0.06
+    min_touches = 2
     
+    tol = max(tr_med * tol_tr_mult, 1e-6)
+    margin = max(tr_med * margin_tr_mult, 1e-6)
+    wick_min = tr_med * 0.25
+
     highs, lows = [], []
     for b in bars:
-        h, l = float(b["high"]), float(b["low"])
-        o, c = float(b["open"]), float(b["close"])
-        body_high, body_low = max(o, c), min(o, c)
+        h, l = float(b.get("high", 0)), float(b.get("low", 0))
+        if h <= 0 or l <= 0: continue
+        o, c = float(b.get("open", 0)), float(b.get("close", 0))
+        body_high = max(o, c)
+        body_low = min(o, c)
         
         if h - body_high >= wick_min:
-            highs.append({"level": body_high, "wick": h, "time": b["time"]})
+            highs.append({"time": b.get("time"), "level": body_high, "wick": h})
         if body_low - l >= wick_min:
-            lows.append({"level": body_low, "wick": l, "time": b["time"]})
+            lows.append({"time": b.get("time"), "level": body_low, "wick": l})
             
-    def cluster_points(pts, tol):
+    if len(highs) + len(lows) < 6:
+        # find swings fallback
+        highs, lows = [], []
+        n = len(bars)
+        if n >= pivot * 2 + 3:
+            for i in range(pivot, n - pivot):
+                b = bars[i]
+                h, l = float(b.get("high", 0)), float(b.get("low", 0))
+                if h <= 0 or l <= 0: continue
+                
+                left_high = max([float(x.get("high", 0)) for x in bars[i-pivot:i]])
+                left_low = min([float(x.get("low", 0)) for x in bars[i-pivot:i]])
+                right_high = max([float(x.get("high", 0)) for x in bars[i+1:i+1+pivot]])
+                right_low = min([float(x.get("low", 0)) for x in bars[i+1:i+1+pivot]])
+                
+                o, c = float(b.get("open", 0)), float(b.get("close", 0))
+                
+                if h > left_high and h > right_high:
+                    highs.append({"time": b.get("time"), "level": max(o, c), "wick": h})
+                if l < left_low and l < right_low:
+                    lows.append({"time": b.get("time"), "level": min(o, c), "wick": l})
+
+    def cluster_points(pts, t):
         if not pts: return []
         pts = sorted(pts, key=lambda x: x["level"])
         clusters = []
         cur = [pts[0]]
         cur_center = pts[0]["level"]
         for p in pts[1:]:
-            if abs(p["level"] - cur_center) <= tol:
+            if abs(p["level"] - cur_center) <= t:
                 cur.append(p)
                 cur_center = sum(x["level"] for x in cur) / len(cur)
             else:
@@ -291,27 +328,160 @@ def calc_raja_sr(bars: List[Dict[str, Any]], lookback: int = 400, pivot: int = 5
 
     res_clusters = cluster_points(highs, tol)
     sup_clusters = cluster_points(lows, tol)
+
+    last_bar = bars[-1]
+    last_t = last_bar.get("time")
+    last_close = float(last_bar.get("close", 0))
+
+    diffs = []
+    recent_80 = bars[-80:]
+    for i in range(len(recent_80)-1):
+        try:
+            d = int(recent_80[i+1]["time"]) - int(recent_80[i]["time"])
+            if d > 0: diffs.append(d)
+        except: pass
+    bar_sec = max(int(get_median(diffs)) if diffs else 60, 1)
+    lookback_n = len(bars)
+
+    def zone_quality_metrics(bottom, top):
+        wick_touch = 0
+        body_overlap = 0
+        close_inside = 0
+        for b in bars:
+            h, l = float(b.get("high", 0)), float(b.get("low", 0))
+            o, c = float(b.get("open", 0)), float(b.get("close", 0))
+            if h >= bottom and l <= top: wick_touch += 1
+            body_low = min(o, c)
+            body_high = max(o, c)
+            if body_high >= bottom and body_low <= top: body_overlap += 1
+            if bottom <= c <= top: close_inside += 1
+        return wick_touch, body_overlap, close_inside
+
+    def zone_from_cluster(cluster, side):
+        if len(cluster) < min_touches: return None
+        levels = [p["level"] for p in cluster]
+        wicks = [p["wick"] for p in cluster]
+        times = [p["time"] for p in cluster]
+        
+        base = get_median(levels)
+        last_touch_time = max(times)
+        
+        if side == "resistance":
+            bottom = base
+            top = base + margin
+            wick_excess = [max(0.0, w - base) for w in wicks]
+        else:
+            top = base
+            bottom = base - margin
+            wick_excess = [max(0.0, base - w) for w in wicks]
+            
+        avg_excess = sum(wick_excess) / len(wick_excess) if wick_excess else 0.0
+        score = len(cluster) * (avg_excess / margin if margin > 0 else 1.0)
+        
+        dist = abs(base - last_close)
+        score = score / (1.0 + dist / (tr_med * 10.0))
+        
+        return {
+            "bottom": bottom,
+            "top": top,
+            "from_time": min(times),
+            "to_time": last_t,
+            "last_touch_time": last_touch_time,
+            "touches": len(cluster),
+            "score": score,
+            "level": base,
+            "avg_wick_excess": avg_excess,
+            "type": side
+        }
+
+    resistance = [z for z in (zone_from_cluster(cl, "resistance") for cl in res_clusters) if z is not None]
+    support = [z for z in (zone_from_cluster(cl, "support") for cl in sup_clusters) if z is not None]
+
+    def merge_zones(zs):
+        if not zs: return []
+        sorted_by_score = sorted(zs, key=lambda x: x["score"], reverse=True)
+        dedup = []
+        min_distance = tol * 1.8
+        for cur in sorted_by_score:
+            too_close = False
+            for ex in dedup:
+                overlapping = (cur["top"] >= ex["bottom"]) and (cur["bottom"] <= ex["top"])
+                level_close = abs(cur["level"] - ex["level"]) < min_distance
+                if overlapping or level_close:
+                    too_close = True
+                    break
+            if not too_close:
+                dedup.append(cur)
+        return sorted(dedup, key=lambda x: x["bottom"])
+
+    all_cands = merge_zones(resistance + support)
+    resistance = [z for z in all_cands if z["type"] == "resistance"]
+    support = [z for z in all_cands if z["type"] == "support"]
+
+    import math
+    max_close_inside_ratio = 0.22
+    max_body_overlap_ratio = 0.35
+    dist_mult = 20.0
+    half_life_bars = max(20.0, lookback_n * 0.75)
+    min_sep = max(tol * 1.2, margin * 1.8)
+
+    def trade_score(z, side):
+        dist = abs(z["level"] - last_close)
+        if dist > tr_med * dist_mult: return -1e9
+        
+        wick_t, body_o, close_i = zone_quality_metrics(z["bottom"], z["top"])
+        close_ratio = close_i / max(1.0, lookback_n)
+        body_ratio = body_o / max(1.0, lookback_n)
+        
+        if close_ratio > max_close_inside_ratio: return -1e9
+        if body_ratio > max_body_overlap_ratio: return -1e9
+        
+        side_mult = 1.0
+        if side == "resistance" and z["bottom"] < last_close - tol: side_mult = 0.65
+        if side == "support" and z["top"] > last_close + tol: side_mult = 0.65
+        
+        clean = 1.0 / (1.0 + close_ratio * 3.0 + body_ratio * 1.5)
+        age_bars = max(0.0, (int(last_t) - int(z["last_touch_time"])) / bar_sec)
+        recency = math.exp(-age_bars / half_life_bars)
+        distance = 1.0 / (1.0 + dist / (tr_med * 4.0))
+        
+        return z["score"] * clean * recency * distance * side_mult
+
+    def pick_trade(zs, side):
+        scored = []
+        for z in zs:
+            s = trade_score(z, side)
+            if s > -1e8:
+                z_copy = dict(z)
+                z_copy["trade_score"] = s
+                scored.append(z_copy)
+                
+        picked = []
+        if scored:
+            if side == "resistance":
+                preferred = [z for z in scored if z["level"] >= last_close]
+                fallback = [z for z in scored if z["level"] < last_close]
+            else:
+                preferred = [z for z in scored if z["level"] <= last_close]
+                fallback = [z for z in scored if z["level"] > last_close]
+                
+            anchor_pool = preferred if preferred else fallback
+            anchor_pool = sorted(anchor_pool, key=lambda x: abs(x["level"] - last_close))
+            if anchor_pool:
+                picked.append(anchor_pool[0])
+                
+        scored = sorted(scored, key=lambda x: x["trade_score"], reverse=True)
+        for z in scored:
+            if len(picked) >= max_zones: break
+            if any(abs(z["level"] - p["level"]) < min_sep for p in picked): continue
+            if z not in picked: picked.append(z)
+            
+        return sorted(picked, key=lambda x: x["level"])
+
+    resistance = pick_trade(resistance, "resistance")
+    support = pick_trade(support, "support")
     
-    zones = []
-    for cl in res_clusters:
-        if len(cl) >= 3: # minTouches
-            levels = [p["level"] for p in cl]
-            wicks = [p["wick"] for p in cl]
-            base = float(np.median(levels))
-            ext = max(wicks)
-            zones.append({"top": ext, "bottom": base, "type": "resistance", "touches": len(cl)})
-            
-    for cl in sup_clusters:
-        if len(cl) >= 3:
-            levels = [p["level"] for p in cl]
-            wicks = [p["wick"] for p in cl]
-            base = float(np.median(levels))
-            ext = min(wicks)
-            zones.append({"top": base, "bottom": ext, "type": "support", "touches": len(cl)})
-            
-    # Sort zones by number of touches (score) descending and limit to top N
-    zones = sorted(zones, key=lambda z: z["touches"], reverse=True)
-    return zones[:max_zones]
+    return resistance + support
 
 def calc_msb_zigzag(bars: List[Dict[str, Any]], pivot_period: int = 5) -> Dict[str, Any]:
     # Extremely simplified MSB ZigZag returning basic structural breaks (BoS / ChoCh proxy)
@@ -370,23 +540,73 @@ def calc_msb_zigzag(bars: List[Dict[str, Any]], pivot_period: int = 5) -> Dict[s
 
     return {"lines": lines[-10:]} # return only recent 10 structures
 
-def calc_trend_exhaustion(bars: List[Dict[str, Any]], short_len: int = 10, long_len: int = 21, threshold: int = 20) -> Dict[str, bool]:
-    # Returns if the current market is Overbought or Oversold based on Williams %R logic
-    if not bars: return {"is_overbought": False, "is_oversold": False}
+def calc_trend_exhaustion(bars: List[Dict[str, Any]], short_len: int = 21, short_smooth: int = 7, long_len: int = 112, long_smooth: int = 3, threshold: int = 20) -> Dict[str, bool]:
+    # Returns if the current market is hitting a reversal triangle (ob_reversal or os_reversal)
+    if len(bars) < max(short_len, long_len) + max(short_smooth, long_smooth):
+        return {"is_overbought": False, "is_oversold": False, "ob_reversal": False, "os_reversal": False}
     
-    def get_pr(idx, length):
+    def get_highest(idx, length):
         start = max(0, idx - length + 1)
         slice_bars = bars[start:idx+1]
-        h = max(float(b["high"]) for b in slice_bars)
-        l = min(float(b["low"]) for b in slice_bars)
-        c = float(bars[idx]["close"])
-        if h == l: return -50
-        return 100 * (c - h) / (h - l)
+        return max(float(b["high"]) for b in slice_bars)
+
+    def get_lowest(idx, length):
+        start = max(0, idx - length + 1)
+        slice_bars = bars[start:idx+1]
+        return min(float(b["low"]) for b in slice_bars)
+
+    s_raw = []
+    l_raw = []
+    for i in range(len(bars)):
+        c = float(bars[i]["close"])
+        s_max = get_highest(i, short_len)
+        s_min = get_lowest(i, short_len)
+        s_val = -50.0 if s_max == s_min else 100 * (c - s_max) / (s_max - s_min)
+        s_raw.append(s_val)
+
+        l_max = get_highest(i, long_len)
+        l_min = get_lowest(i, long_len)
+        l_val = -50.0 if l_max == l_min else 100 * (c - l_max) / (l_max - l_min)
+        l_raw.append(l_val)
         
-    s_pr = get_pr(len(bars)-1, short_len)
-    l_pr = get_pr(len(bars)-1, long_len)
+    def calc_ema(src: List[float], length: int) -> List[float]:
+        if length <= 1: return src
+        alpha = 2 / (length + 1)
+        res = []
+        ema = None
+        for val in src:
+            if ema is None:
+                ema = val
+            else:
+                ema = alpha * val + (1 - alpha) * ema
+            res.append(ema)
+        return res
+
+    s_pr = calc_ema(s_raw, short_smooth)
+    l_pr = calc_ema(l_raw, long_smooth)
     
-    ob = s_pr >= -threshold and l_pr >= -threshold
-    os = s_pr <= -100 + threshold and l_pr <= -100 + threshold
+    # We need to look at the last two bars to detect a reversal
+    idx_curr = len(bars) - 1
+    idx_prev = len(bars) - 2
+
+    def is_ob(idx):
+        return s_pr[idx] >= -threshold and l_pr[idx] >= -threshold
+
+    def is_os(idx):
+        return s_pr[idx] <= -100 + threshold and l_pr[idx] <= -100 + threshold
+
+    curr_ob = is_ob(idx_curr)
+    curr_os = is_os(idx_curr)
     
-    return {"is_overbought": ob, "is_oversold": os}
+    prev_ob = is_ob(idx_prev)
+    prev_os = is_os(idx_prev)
+
+    ob_reversal = (not curr_ob) and prev_ob
+    os_reversal = (not curr_os) and prev_os
+    
+    return {
+        "is_overbought": curr_ob, 
+        "is_oversold": curr_os,
+        "ob_reversal": ob_reversal,
+        "os_reversal": os_reversal
+    }

@@ -50,6 +50,35 @@ function createMenu() {
       ]
     },
     {
+      label: '工具',
+      submenu: [
+        { 
+          label: '数据缺口检测与自动回补',
+          click: () => {
+            const http = require('http');
+            const req = http.request({
+              hostname: '127.0.0.1',
+              port: 8000,
+              path: '/api/broker/reconcile/force?timeframe=M1',
+              method: 'POST'
+            }, (res) => {
+              const { dialog } = require('electron');
+              dialog.showMessageBox(mainWindow, {
+                type: 'info',
+                title: '扫描已启动',
+                message: '已通知后台开始深度扫描和自动回补数据缺口。您可以在前端图表右上角进度条观察进度。'
+              });
+            });
+            req.on('error', (e) => {
+              const { dialog } = require('electron');
+              dialog.showErrorBox('错误', '无法连接到后台服务: ' + e.message);
+            });
+            req.end();
+          }
+        }
+      ]
+    },
+    {
       label: '视图',
       submenu: [
         { role: 'reload', label: '刷新页面' },

@@ -37,6 +37,17 @@ def init_tables() -> None:
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_reports (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              alert_id INTEGER,
+              session_id TEXT,
+              ts INTEGER,
+              report_content TEXT
+            )
+            """
+        )
         conn.commit()
 
 
@@ -116,6 +127,38 @@ def list_events(limit: int = 100) -> List[Dict[str, Any]]:
             (int(limit),),
         ).fetchall()
         return [{"id": r[0], "alert_id": r[1], "ts": r[2], "message": r[3]} for r in rows]
+
+def save_ai_report(alert_id: int, session_id: str, report_content: str) -> None:
+    init_tables()
+    with _conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO ai_reports(alert_id, session_id, ts, report_content) VALUES(?,?,?,?)",
+            (int(alert_id), str(session_id), int(time.time()), str(report_content)),
+        )
+        conn.commit()
+
+def list_ai_reports(limit: int = 50) -> List[Dict[str, Any]]:
+    init_tables()
+    with _conn() as conn:
+        cur = conn.cursor()
+        rows = cur.execute(
+            """
+            SELECT r.id, r.alert_id, r.session_id, r.ts, r.report_content, a.name 
+            FROM ai_reports r
+            LEFT JOIN alerts a ON r.alert_id = a.id
+            ORDER BY r.id DESC LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+        return [{
+            "id": r[0], 
+            "alert_id": r[1], 
+            "session_id": r[2], 
+            "ts": r[3], 
+            "report_content": r[4],
+            "alert_name": r[5] or f"Alert #{r[1]}"
+        } for r in rows]
 
 
 def get_enabled_alerts() -> List[Dict[str, Any]]:

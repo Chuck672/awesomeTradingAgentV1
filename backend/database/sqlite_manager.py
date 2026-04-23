@@ -1,4 +1,21 @@
 import sqlite3
+import contextlib
+import time
+
+@contextlib.contextmanager
+def get_db_conn(db_path):
+    for _ in range(10):
+        try:
+            with contextlib.closing(sqlite3.connect(db_path, timeout=30.0)) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                yield conn
+            return
+        except sqlite3.OperationalError as e:
+            if "unable to open database file" in str(e) or "database is locked" in str(e):
+                time.sleep(0.1)
+            else:
+                raise
+    raise sqlite3.OperationalError(f"Failed to open {db_path} after 10 retries")
 import os
 import logging
 from typing import List, Dict, Any, Optional
@@ -20,10 +37,15 @@ class SQLiteManager:
         os.makedirs(self.sandbox_dir, exist_ok=True)
         self.db_path = os.path.join(self.sandbox_dir, "data.sqlite")
         self.write_lock = asyncio.Lock()
+        
+
         self._init_db()
 
+
+
+
     def _init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             
             # 1. Active Symbols (from BrokerMetaStore)
@@ -136,7 +158,7 @@ class SQLiteManager:
     # Meta Store API
     # ==========================================
     def add_symbol(self, symbol: str, timeframes: List[str] = ["M1", "M5", "M15", "H1"]):
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             tf_json = json.dumps(timeframes)
             cursor.execute("""
@@ -148,7 +170,7 @@ class SQLiteManager:
             logger.info(f"Added active symbol: {symbol} {timeframes}")
 
     def clear_all_symbols(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM active_symbols")
             cursor.execute("DELETE FROM sync_state")
@@ -156,7 +178,7 @@ class SQLiteManager:
             logger.info("Cleared all active symbols and sync states")
 
     def get_active_symbols(self) -> Dict[str, List[str]]:
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("SELECT symbol, timeframes FROM active_symbols WHERE is_active = 1")
             rows = cursor.fetchall()
@@ -169,24 +191,30 @@ class SQLiteManager:
             return result
 
     def update_sync_state(self, symbol: str, timeframe: str, last_time: int):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO sync_state (symbol, timeframe, last_sync_time)
-                VALUES (?, ?, ?)
-                ON CONFLICT(symbol, timeframe) DO UPDATE SET last_sync_time=excluded.last_sync_time
-            """, (symbol, timeframe, last_time))
-            conn.commit()
+        try:
+            with get_db_conn(self.db_path) as conn, conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO sync_state (symbol, timeframe, last_sync_time)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(symbol, timeframe) DO UPDATE SET last_sync_time=excluded.last_sync_time
+                """, (symbol, timeframe, last_time))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error in update_sync_state opening {self.db_path}: {e}")
+            logger.error(f"Environment APPDATA: {os.environ.get('APPDATA')}")
+            logger.error(f"Does file exist? {os.path.exists(self.db_path)}")
+            raise
 
     def get_sync_state(self, symbol: str, timeframe: str) -> Optional[int]:
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("SELECT last_sync_time FROM sync_state WHERE symbol = ? AND timeframe = ?", (symbol, timeframe))
             row = cursor.fetchone()
             return row[0] if row else None
 
     def update_archive_state(self, symbol: str, timeframe: str, archive_month: str):
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO sync_state (symbol, timeframe, last_archived_month)
@@ -196,7 +224,7 @@ class SQLiteManager:
             conn.commit()
 
     def get_archive_state(self, symbol: str, timeframe: str) -> Optional[str]:
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("SELECT last_archived_month FROM sync_state WHERE symbol = ? AND timeframe = ?", (symbol, timeframe))
             row = cursor.fetchone()
@@ -233,7 +261,7 @@ class SQLiteManager:
         
         async with self.write_lock:
             def _exec():
-                with sqlite3.connect(self.db_path) as conn:
+                with get_db_conn(self.db_path) as conn, conn:
                     conn.executemany(stmt, records)
                     conn.commit()
             try:
@@ -242,14 +270,14 @@ class SQLiteManager:
                 logger.error(f"Failed to upsert bars to SQLite: {e}")
 
     def get_time_range(self, symbol: str, timeframe: str) -> Dict[str, Optional[int]]:
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("SELECT MIN(time), MAX(time) FROM ohlcv WHERE symbol = ? AND timeframe = ?", (symbol, timeframe))
             result = cursor.fetchone()
             return {'min_time': result[0] if result else None, 'max_time': result[1] if result else None}
 
     def fetch_hot_data(self, symbol: str, timeframe: str, since: int = 0) -> List[Dict[str, Any]]:
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT time, open, high, low, close, tick_volume, delta_volume, source
@@ -275,7 +303,7 @@ class SQLiteManager:
         """
         async with self.write_lock:
             def _exec():
-                with sqlite3.connect(self.db_path) as conn:
+                with get_db_conn(self.db_path) as conn, conn:
                     conn.execute(stmt, (symbol, timeframe, int(ts), snapshot_id, state_hash, scene_json))
                     conn.commit()
             await asyncio.to_thread(_exec)
@@ -290,13 +318,13 @@ class SQLiteManager:
         """
         async with self.write_lock:
             def _exec():
-                with sqlite3.connect(self.db_path) as conn:
+                with get_db_conn(self.db_path) as conn, conn:
                     conn.execute(stmt, (symbol, timeframe, int(updated_at), state_json))
                     conn.commit()
             await asyncio.to_thread(_exec)
 
     def get_runtime_state(self, symbol: str, timeframe: str) -> Optional[Dict[str, Any]]:
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             row = cursor.execute("SELECT updated_at, state_json FROM runtime_states WHERE symbol = ? AND timeframe = ?", (symbol, timeframe)).fetchone()
             if not row:
@@ -329,7 +357,7 @@ class SQLiteManager:
         q = f"SELECT time, snapshot_id, state_hash, scene_json FROM scene_snapshots {where} ORDER BY time {order} LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset)])
 
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(q, params)
             out: List[Dict[str, Any]] = []
@@ -393,7 +421,7 @@ class SQLiteManager:
                     pass
             return {"time": int(t), "snapshot_id": snapshot_id, "state_hash": state_hash, "scene": scene}
 
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_conn(self.db_path) as conn, conn:
             cursor = conn.cursor()
             row = cursor.execute("SELECT time, snapshot_id, state_hash, scene_json FROM scene_snapshots WHERE symbol = ? AND timeframe = ? AND time = ? LIMIT 1", (symbol, timeframe, ts)).fetchone()
             if row: return _parse(row)
@@ -423,7 +451,7 @@ class SQLiteManager:
     async def list_strategy_annotations(self, symbol: str, timeframe: str, trigger_time: int, rule_id: str) -> Dict[str, Any]:
         key = self._candidate_key(symbol, timeframe, trigger_time, rule_id)
         def _q():
-            with sqlite3.connect(self.db_path) as conn:
+            with get_db_conn(self.db_path) as conn, conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT version, is_active, created_at, updated_at, snapshot_id, data_version, annotation_json FROM strategy_annotations WHERE candidate_key = ? ORDER BY version DESC", (key,))
                 rows = cursor.fetchall()
@@ -456,7 +484,7 @@ class SQLiteManager:
         now = int(time.time())
         async with self.write_lock:
             def _exec():
-                with sqlite3.connect(self.db_path) as conn:
+                with get_db_conn(self.db_path) as conn, conn:
                     cursor = conn.cursor()
                     row = cursor.execute("SELECT MAX(version) FROM strategy_annotations WHERE candidate_key = ?", (key,)).fetchone()
                     mx = int(row[0] or 0) if row and row[0] else 0
@@ -488,7 +516,7 @@ class SQLiteManager:
         version = int(version)
         async with self.write_lock:
             def _exec():
-                with sqlite3.connect(self.db_path) as conn:
+                with get_db_conn(self.db_path) as conn, conn:
                     cursor = conn.cursor()
                     cursor.execute("UPDATE strategy_annotations SET is_active = 0 WHERE candidate_key = ?", (key,))
                     cursor.execute("UPDATE strategy_annotations SET is_active = 1, updated_at = ? WHERE candidate_key = ? AND version = ?", (now, key, version))
@@ -499,7 +527,7 @@ class SQLiteManager:
     async def list_strategy_gate_decisions(self, symbol: str, timeframe: str, trigger_time: int, rule_id: str) -> Dict[str, Any]:
         key = self._candidate_key(symbol, timeframe, trigger_time, rule_id)
         def _q():
-            with sqlite3.connect(self.db_path) as conn:
+            with get_db_conn(self.db_path) as conn, conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT version, is_active, created_at, updated_at, snapshot_id, data_version, annotation_version, decision_json, trade_plan_json FROM strategy_gate_decisions WHERE candidate_key = ? ORDER BY version DESC", (key,))
                 rows = cursor.fetchall()
@@ -533,7 +561,7 @@ class SQLiteManager:
         now = int(time.time())
         async with self.write_lock:
             def _exec():
-                with sqlite3.connect(self.db_path) as conn:
+                with get_db_conn(self.db_path) as conn, conn:
                     cursor = conn.cursor()
                     row = cursor.execute("SELECT MAX(version) FROM strategy_gate_decisions WHERE candidate_key = ?", (key,)).fetchone()
                     mx = int(row[0] or 0) if row and row[0] else 0
@@ -566,7 +594,7 @@ class SQLiteManager:
         version = int(version)
         async with self.write_lock:
             def _exec():
-                with sqlite3.connect(self.db_path) as conn:
+                with get_db_conn(self.db_path) as conn, conn:
                     cursor = conn.cursor()
                     cursor.execute("UPDATE strategy_gate_decisions SET is_active = 0 WHERE candidate_key = ?", (key,))
                     cursor.execute("UPDATE strategy_gate_decisions SET is_active = 1, updated_at = ? WHERE candidate_key = ? AND version = ?", (now, key, version))
