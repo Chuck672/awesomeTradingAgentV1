@@ -4,36 +4,11 @@
   "author": "QuantLogicLab",
   "description": "Awesome Chart Application",
   "private": true,
-  "main": "main.js",
-  "build": {
-    "appId": "com.quantlogiclab.awesomechartv3",
-    "productName": "AwesomeChartV3",
-    "directories": {
-      "output": "dist_electron"
-    },
-    "files": [
-      "out/**/*",
-      "electron/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "../backend/dist/main",
-        "to": "backend"
-      }
-    ],
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "icon": "build/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true
-    }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Chuck672/awesomeTradingAgentV1.git"
   },
+  "main": "main.js",
   "scripts": {
     "dev": "next dev -p 3123",
     "build": "next build",
@@ -42,7 +17,7 @@
     "electron:build": "npm run export && electron-builder",
     "start": "next start -p 3123",
     "lint": "eslint",
-    "dist": "npm run build && electron-builder --win",
+    "dist": "npm run build && electron-builder --win --publish never",
     "electron": "wait-on http://localhost:3000 && electron ."
   },
   "build": {
