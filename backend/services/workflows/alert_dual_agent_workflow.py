@@ -252,12 +252,17 @@ class AlertDualAgentWorkflow:
             ep = _safe_float(analyzer_plan.get("entry_price"))
             sl = _safe_float(analyzer_plan.get("stop_loss"))
             tp = _safe_float(analyzer_plan.get("take_profit"))
+            
+            # 根据 signal (buy, sell, hold) 决定线型样式
+            signal = str(analyzer_plan.get("signal") or "").strip().lower()
+            line_style = 2 if signal == "hold" else 0  # Lightweight Charts: 0=Solid(实线), 1=Dotted, 2=Dashed(虚线)
+
             if ep > 0:
-                objects.append({"type": "hline", "price": ep, "color": "#3b82f6", "text": "Entry"})
+                objects.append({"type": "hline", "price": ep, "color": "#3b82f6", "text": "Entry", "lineStyle": line_style})
             if sl > 0:
-                objects.append({"type": "hline", "price": sl, "color": "#ef4444", "text": "SL"})
+                objects.append({"type": "hline", "price": sl, "color": "#ef4444", "text": "SL", "lineStyle": line_style})
             if tp > 0:
-                objects.append({"type": "hline", "price": tp, "color": "#22c55e", "text": "TP"})
+                objects.append({"type": "hline", "price": tp, "color": "#22c55e", "text": "TP", "lineStyle": line_style})
             
             if objects:
                 ui_actions.append({"action": "draw_objects", "objects": objects})
