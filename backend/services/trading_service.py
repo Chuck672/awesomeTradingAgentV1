@@ -331,3 +331,189 @@ def build_rules_report(days: List[Dict[str, Any]]) -> Dict[str, Any]:
         "issues": issues,
     }
 
+
+def _session_label_utc(ts: int) -> str:
+    h = dt.datetime.utcfromtimestamp(int(ts)).hour
+    if 13 <= h <= 20:
+        return "NY"
+    if 7 <= h <= 15:
+        return "London"
+    if 0 <= h <= 7:
+        return "Asia"
+    return "Other"
+
+
+def _weekday_from_day_str(day: str) -> int:
+    d = dt.datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=dt.timezone.utc)
+    wd = d.weekday()
+    return int(wd)
+
+
+def _calc_symbol_stats(account_id: str, from_ts: int, to_ts: int) -> List[Dict[str, Any]]:
+    db_path = _ensure_broker_db_path()
+    with get_db_conn(db_path) as conn, conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT symbol, position_id, profit, commission, swap
+            FROM trade_deals
+            WHERE account_id = ? AND time >= ? AND time < ? AND symbol != ''
+            ORDER BY time ASC
+            """,
+            (account_id, int(from_ts), int(to_ts)),
+        )
+        rows = cur.fetchall()
+
+    by_sym_pos: Dict[str, Dict[int, float]] = {}
+    for (symbol, position_id, profit, commission, swap) in rows:
+        sym = str(symbol or "")
+        if not sym:
+            continue
+        pid = int(position_id or 0)
+        if pid <= 0:
+            continue
+        pl = float(profit or 0.0) + float(commission or 0.0) + float(swap or 0.0)
+        m = by_sym_pos.get(sym)
+        if m is None:
+            m = {}
+            by_sym_pos[sym] = m
+        m[pid] = m.get(pid, 0.0) + pl
+
+    out: List[Dict[str, Any]] = []
+    for sym, pos_map in by_sym_pos.items():
+        trades = int(len(pos_map))
+        wins = int(sum(1 for v in pos_map.values() if float(v) > 0))
+        pl = float(sum(float(v) for v in pos_map.values()))
+        win_rate = (wins / trades * 100.0) if trades > 0 else 0.0
+        out.append({"symbol": sym, "pl": pl, "trades": trades, "winning_trades": wins, "win_rate": win_rate})
+    out.sort(key=lambda x: abs(float(x.get("pl") or 0.0)), reverse=True)
+    return out
+
+
+def _calc_session_stats(account_id: str, from_ts: int, to_ts: int) -> List[Dict[str, Any]]:
+    db_path = _ensure_broker_db_path()
+    with get_db_conn(db_path) as conn, conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT time, symbol, position_id, profit, commission, swap
+            FROM trade_deals
+            WHERE account_id = ? AND time >= ? AND time < ? AND symbol != ''
+            ORDER BY time ASC
+            """,
+            (account_id, int(from_ts), int(to_ts)),
+        )
+        rows = cur.fetchall()
+
+    by_session_pos: Dict[str, Dict[int, float]] = {}
+    for (t, symbol, position_id, profit, commission, swap) in rows:
+        if not symbol:
+            continue
+        pid = int(position_id or 0)
+        if pid <= 0:
+            continue
+        sess = _session_label_utc(int(t or 0))
+        pl = float(profit or 0.0) + float(commission or 0.0) + float(swap or 0.0)
+        m = by_session_pos.get(sess)
+        if m is None:
+            m = {}
+            by_session_pos[sess] = m
+        m[pid] = m.get(pid, 0.0) + pl
+
+    out: List[Dict[str, Any]] = []
+    for sess, pos_map in by_session_pos.items():
+        trades = int(len(pos_map))
+        wins = int(sum(1 for v in pos_map.values() if float(v) > 0))
+        pl = float(sum(float(v) for v in pos_map.values()))
+        win_rate = (wins / trades * 100.0) if trades > 0 else 0.0
+        out.append({"session": sess, "pl": pl, "trades": trades, "winning_trades": wins, "win_rate": win_rate})
+    out.sort(key=lambda x: str(x.get("session") or ""))
+    return out
+
+
+def _equity_curve(days: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    items = sorted([d for d in days if isinstance(d, dict)], key=lambda x: str(x.get("day") or ""))
+    equity = 0.0
+    peak = 0.0
+    out = []
+    for d in items:
+        equity += float(d.get("pl") or 0.0)
+        if equity > peak:
+            peak = equity
+        dd = equity - peak
+        out.append({"day": str(d.get("day") or ""), "equity": float(equity), "drawdown": float(dd)})
+    return out
+
+
+def get_stats(*, from_day: str, to_day: str) -> Dict[str, Any]:
+    rep = get_daily(from_day=from_day, to_day=to_day)
+    account_id = str(rep.get("account_id") or "")
+    days = rep.get("days") if isinstance(rep.get("days"), list) else []
+    from_ts, to_ts = _parse_date_range(from_day, to_day)
+
+    rules = build_rules_report(days)
+    equity = _equity_curve(days)
+    by_symbol = _calc_symbol_stats(account_id, from_ts, to_ts)
+    by_session = _calc_session_stats(account_id, from_ts, to_ts)
+
+    by_weekday_map: Dict[int, Dict[str, Any]] = {}
+    for d in days:
+        day = str((d or {}).get("day") or "")
+        if not day:
+            continue
+        wd = _weekday_from_day_str(day)
+        st = by_weekday_map.get(wd)
+        if st is None:
+            st = {"weekday": wd, "pl": 0.0, "trades": 0, "wins": 0}
+            by_weekday_map[wd] = st
+        st["pl"] += float((d or {}).get("pl") or 0.0)
+        st["trades"] += int((d or {}).get("trades") or 0)
+        st["wins"] += int((d or {}).get("winning_trades") or 0)
+
+    by_weekday = []
+    for wd, st in by_weekday_map.items():
+        tr = int(st.get("trades") or 0)
+        wins = int(st.get("wins") or 0)
+        by_weekday.append(
+            {"weekday": int(wd), "pl": float(st.get("pl") or 0.0), "trades": tr, "win_rate": (wins / tr * 100.0) if tr > 0 else 0.0}
+        )
+    by_weekday.sort(key=lambda x: int(x.get("weekday") or 0))
+
+    cur_summary = rules.get("summary") if isinstance(rules, dict) else {}
+    cur_summary = cur_summary if isinstance(cur_summary, dict) else {}
+
+    prev = None
+    delta = {}
+    try:
+        s_dt = dt.datetime.strptime(from_day, "%Y-%m-%d").replace(tzinfo=dt.timezone.utc)
+        e_dt = dt.datetime.strptime(to_day, "%Y-%m-%d").replace(tzinfo=dt.timezone.utc)
+        n_days = int((e_dt - s_dt).days) + 1
+        prev_to = (s_dt - dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        prev_from = (s_dt - dt.timedelta(days=n_days)).strftime("%Y-%m-%d")
+        prev_rep = get_daily(from_day=prev_from, to_day=prev_to)
+        prev_days = prev_rep.get("days") if isinstance(prev_rep.get("days"), list) else []
+        prev_rules = build_rules_report(prev_days)
+        prev_summary = prev_rules.get("summary") if isinstance(prev_rules, dict) else {}
+        prev_summary = prev_summary if isinstance(prev_summary, dict) else {}
+        prev = {"from": prev_from, "to": prev_to, "summary": prev_summary}
+        delta = {"total_pl": float(cur_summary.get("total_pl") or 0.0) - float(prev_summary.get("total_pl") or 0.0)}
+    except Exception:
+        prev = None
+        delta = {}
+
+    return {
+        "ok": True,
+        "account_id": account_id,
+        "current": {
+            "from": from_day,
+            "to": to_day,
+            "summary": cur_summary,
+            "daily_pl": [{"day": str(d.get("day") or ""), "pl": float(d.get("pl") or 0.0)} for d in days if isinstance(d, dict)],
+            "equity_curve": equity,
+            "by_symbol": by_symbol,
+            "by_weekday": by_weekday,
+            "by_session": by_session,
+        },
+        "previous": prev,
+        "delta": delta,
+    }

@@ -93,7 +93,7 @@ export function RightPanel(props: {
 
   return (
     <aside
-      className="h-full shrink-0 border-l dark:border-white/10 border-black/10 dark:bg-[#0b0f14] bg-white dark:text-gray-200 text-gray-800 flex flex-col"
+      className="h-full shrink-0 border-l dark:border-white/10 border-black/10 dark:bg-[#0b0f14] bg-white dark:text-gray-200 text-gray-800 flex flex-col sidebar-scrollbar"
       style={{ width }}
     >
       <div className="px-3 py-2 border-b dark:border-white/10 border-black/10 flex items-center justify-between">

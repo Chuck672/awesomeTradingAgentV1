@@ -36,7 +36,7 @@ from backend.services.alerts_store import list_alerts as alerts_list, create_ale
 from backend.domain.market.catalog import get_market_feature_catalog
 from backend.data_sources.mt5_source import MT5_AVAILABLE, mt5_source
 from backend.services.chart_scene import scene_engine, SceneParams
-from backend.services.trading_service import get_daily as trading_get_daily, get_day_detail as trading_get_day, build_rules_report
+from backend.services.trading_service import get_daily as trading_get_daily, get_day_detail as trading_get_day, build_rules_report, get_stats as trading_get_stats
 import json
 import re
 
@@ -281,6 +281,13 @@ async def api_trading_coach(payload: Dict[str, Any] = Body(default={})):
     except Exception as e:
         coach_text = f"(coach_failed) {str(e)}"
     return {"ok": True, "from": from_day, "to": to_day, "rules": rules, "coach": coach_text}
+
+@router.get("/trading/stats")
+async def api_trading_stats(from_day: str = Query(...), to_day: str = Query(...)):
+    try:
+        return await asyncio.to_thread(trading_get_stats, from_day=from_day, to_day=to_day)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/symbols")
 async def get_symbols():

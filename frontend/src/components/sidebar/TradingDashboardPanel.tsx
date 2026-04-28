@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { getBaseUrl } from "@/lib/api";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, AreaChart, Area, BarChart, Bar, Cell } from "recharts";
+import { Settings, ChartLine } from "lucide-react";
 
 type DailyAgg = {
   day: string;
@@ -39,6 +41,27 @@ type CalendarEvent = {
   previous: string;
   forecast: string;
   actual: string;
+};
+
+type TradingStatsResponse = {
+  ok: boolean;
+  account_id: string;
+  current: {
+    from: string;
+    to: string;
+    summary: any;
+    daily_pl: Array<{ day: string; pl: number }>;
+    equity_curve: Array<{ day: string; equity: number; drawdown: number }>;
+    by_symbol: Array<{ symbol: string; pl: number; trades: number; winning_trades: number; win_rate: number }>;
+    by_weekday: Array<{ weekday: number; pl: number; trades: number; win_rate: number }>;
+    by_session: Array<{ session: string; pl: number; trades: number; win_rate: number }>;
+  };
+  previous: {
+    from: string;
+    to: string;
+    summary: any;
+  } | null;
+  delta: any;
 };
 
 async function readJsonOrThrow(r: Response) {
@@ -97,15 +120,33 @@ function loadAgentConfigs(): any {
   }
 }
 
+function loadAgentSettingsRaw(): any {
+  try {
+    const raw = localStorage.getItem("awesome_trading_agent_settings_v3");
+    if (!raw) return { configs: {} };
+    const s = JSON.parse(raw);
+    if (s && typeof s === "object") return s;
+    return { configs: {} };
+  } catch {
+    return { configs: {} };
+  }
+}
+
+function saveAgentSettingsRaw(next: any) {
+  try {
+    localStorage.setItem("awesome_trading_agent_settings_v3", JSON.stringify(next));
+  } catch {}
+}
+
 function Modal(props: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
   if (!props.open) return null;
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl rounded-xl border border-white/10 bg-[#0b0f14] text-gray-200 shadow-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-          <div className="text-sm font-semibold">{props.title}</div>
+      <div className="w-full max-w-3xl rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#0b0f14] text-gray-800 dark:text-gray-200 shadow-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-white/10 flex items-center justify-between">
+          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{props.title}</div>
           <button
-            className="w-8 h-8 rounded-lg border border-white/10 hover:bg-white/5 flex items-center justify-center"
+            className="w-8 h-8 rounded-lg border border-gray-200 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 flex items-center justify-center"
             onClick={props.onClose}
             title="关闭"
             type="button"
@@ -113,7 +154,7 @@ function Modal(props: { open: boolean; title: string; onClose: () => void; child
             ×
           </button>
         </div>
-        <div className="p-4 max-h-[80vh] overflow-auto">{props.children}</div>
+        <div className="p-4 max-h-[80vh] overflow-auto custom-scrollbar">{props.children}</div>
       </div>
     </div>
   );
@@ -138,6 +179,17 @@ export function TradingDashboardPanel(props: { symbol?: string; timeframe?: stri
   const [coachBusy, setCoachBusy] = useState(false);
   const [coachText, setCoachText] = useState<string>("");
   const [coachRules, setCoachRules] = useState<any>(null);
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [coachSettingsOpen, setCoachSettingsOpen] = useState(false);
+  const [coachApiKey, setCoachApiKey] = useState<string>(() => {
+    const s = loadAgentSettingsRaw();
+    return String(s?.configs?.analyzer?.api_key || "");
+  });
+
+  const [insightsOpen, setInsightsOpen] = useState(false);
+  const [statsBusy, setStatsBusy] = useState(false);
+  const [stats, setStats] = useState<TradingStatsResponse | null>(null);
+  const [insightsTab, setInsightsTab] = useState<"equity" | "dist" | "symbol" | "heatmap">("equity");
 
   const range = useMemo(() => {
     if (mode === "year") {
@@ -261,6 +313,19 @@ export function TradingDashboardPanel(props: { symbol?: string; timeframe?: stri
     }
   };
 
+  const fetchStats = async () => {
+    setStatsBusy(true);
+    try {
+      const r = await fetch(`${baseUrl}/api/trading/stats?from_day=${encodeURIComponent(fromDay)}&to_day=${encodeURIComponent(toDay)}`).then(readJsonOrThrow);
+      setStats(r as TradingStatsResponse);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load stats");
+      setStats(null);
+    } finally {
+      setStatsBusy(false);
+    }
+  };
+
   const dayEvents = useMemo(() => {
     if (!selectedDay) return [];
     const start = Date.parse(selectedDay + "T00:00:00Z") / 1000;
@@ -292,14 +357,31 @@ export function TradingDashboardPanel(props: { symbol?: string; timeframe?: stri
             <div className="text-sm font-semibold">Trading Dashboard</div>
             <div className="text-[11px] text-gray-500">{accountId || ""}</div>
           </div>
-          <button
-            className="text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/15 border border-white/10 text-gray-200"
-            type="button"
-            onClick={fetchDaily}
-            disabled={loading}
-          >
-            {loading ? "Loading..." : "Refresh"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/15 border border-white/10 text-gray-200"
+              type="button"
+              onClick={async () => {
+                setInsightsOpen(true);
+                if (!stats) await fetchStats();
+              }}
+              disabled={statsBusy}
+              title="查看图表与对比"
+            >
+              <span className="inline-flex items-center gap-1">
+                <ChartLine size={14} />
+                Insights
+              </span>
+            </button>
+            <button
+              className="text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/15 border border-white/10 text-gray-200"
+              type="button"
+              onClick={fetchDaily}
+              disabled={loading}
+            >
+              {loading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-2">
@@ -354,7 +436,7 @@ export function TradingDashboardPanel(props: { symbol?: string; timeframe?: stri
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto bg-black/20 border border-white/10 rounded-lg p-3">
+      <div className="flex-1 overflow-auto custom-scrollbar bg-black/20 border border-white/10 rounded-lg p-3">
         {mode === "month" && (
           <div className="grid grid-cols-7 gap-2">
             {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => (
@@ -409,22 +491,38 @@ export function TradingDashboardPanel(props: { symbol?: string; timeframe?: stri
       <div className="bg-black/20 border border-white/10 rounded-lg p-3">
         <div className="flex items-center justify-between">
           <div className="text-xs text-gray-400">Coach (Rules + AI)</div>
-          <button
-            type="button"
-            className="text-xs px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
-            onClick={runCoach}
-            disabled={coachBusy}
-          >
-            {coachBusy ? "Generating..." : "Generate"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="w-8 h-8 rounded border border-white/10 hover:bg-white/5 flex items-center justify-center text-gray-200"
+              onClick={() => setCoachSettingsOpen(true)}
+              title="Coach 设置"
+            >
+              <Settings size={16} />
+            </button>
+            <button
+              type="button"
+              className="text-xs px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
+              onClick={async () => {
+                await runCoach();
+                setCoachOpen(true);
+              }}
+              disabled={coachBusy}
+            >
+              {coachBusy ? "Generating..." : "Generate"}
+            </button>
+          </div>
         </div>
-        {coachRules && (
-          <pre className="mt-2 text-[11px] leading-4 bg-black/30 border border-white/10 rounded p-2 overflow-auto whitespace-pre-wrap text-gray-200">
-            {JSON.stringify(coachRules, null, 2)}
-          </pre>
+        {coachText ? (
+          <div className="mt-2 text-[11px] text-gray-300">
+            {String(coachText).split("\n").filter(Boolean)[0] || "Coach report generated."}
+            <button className="ml-2 text-[11px] text-emerald-300 hover:underline" type="button" onClick={() => setCoachOpen(true)}>
+              查看全文
+            </button>
+          </div>
+        ) : (
+          <div className="mt-2 text-[11px] text-gray-500">点击 Generate 生成规则诊断 + AI 教练建议（生成后在弹窗中查看）。</div>
         )}
-        {coachText && <div className="mt-2 text-[12px] leading-5 whitespace-pre-wrap text-gray-200">{coachText}</div>}
-        {!coachRules && !coachText && <div className="mt-2 text-[11px] text-gray-500">Click Generate to get rule-based diagnostics and AI coaching notes.</div>}
       </div>
 
       <Modal open={!!selectedDay} title={selectedDay ? `Daily Detail • ${selectedDay}` : "Daily Detail"} onClose={() => setSelectedDay(null)}>
@@ -471,9 +569,9 @@ export function TradingDashboardPanel(props: { symbol?: string; timeframe?: stri
           {dayDetail.length === 0 ? (
             <div className="p-3 text-[11px] text-gray-500">No deals.</div>
           ) : (
-            <div className="max-h-[40vh] overflow-auto">
+            <div className="max-h-[40vh] overflow-auto custom-scrollbar">
               <table className="w-full text-[11px]">
-                <thead className="sticky top-0 bg-[#0b0f14]">
+                <thead className="sticky top-0 bg-white dark:bg-[#0b0f14]">
                   <tr className="text-gray-400 border-b border-white/10">
                     <th className="text-left p-2">Time</th>
                     <th className="text-left p-2">Symbol</th>
@@ -503,7 +601,251 @@ export function TradingDashboardPanel(props: { symbol?: string; timeframe?: stri
           )}
         </div>
       </Modal>
+
+      <Modal open={coachOpen} title="Coach Report" onClose={() => setCoachOpen(false)}>
+        {coachText ? (
+          <div className="text-sm leading-6 whitespace-pre-wrap">{coachText}</div>
+        ) : (
+          <div className="text-sm text-gray-500">No coach report.</div>
+        )}
+        {coachRules && (
+          <details className="mt-4">
+            <summary className="cursor-pointer text-xs text-gray-500 dark:text-gray-400">Rules JSON</summary>
+            <pre className="mt-2 text-[11px] leading-4 bg-black/5 dark:bg-black/30 border border-gray-200 dark:border-white/10 rounded p-2 overflow-auto custom-scrollbar whitespace-pre-wrap text-gray-800 dark:text-gray-200">
+              {JSON.stringify(coachRules, null, 2)}
+            </pre>
+          </details>
+        )}
+      </Modal>
+
+      <Modal open={coachSettingsOpen} title="Coach Settings" onClose={() => setCoachSettingsOpen(false)}>
+        <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+          保存后会写入本地设置（awesome_trading_agent_settings_v3），仅影响本机。
+        </div>
+        <div className="flex flex-col gap-2">
+          <label className="text-xs text-gray-700 dark:text-gray-300">
+            API Key
+            <input
+              type="password"
+              className="mt-1 w-full px-2 py-2 rounded bg-gray-50 dark:bg-black/40 border border-gray-200 dark:border-white/10 text-gray-800 dark:text-white"
+              value={coachApiKey}
+              onChange={(e) => setCoachApiKey(e.target.value)}
+              placeholder="sk-..."
+            />
+          </label>
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              type="button"
+              className="px-3 py-2 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25"
+              onClick={() => {
+                const s = loadAgentSettingsRaw();
+                const next = { ...(s || {}) };
+                const cfgs = { ...(next.configs || {}) };
+                const analyzer = { ...(cfgs.analyzer || {}) };
+                analyzer.api_key = coachApiKey || "";
+                cfgs.analyzer = analyzer;
+                next.configs = cfgs;
+                saveAgentSettingsRaw(next);
+                setCoachSettingsOpen(false);
+              }}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              className="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/15 border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-200"
+              onClick={() => setCoachSettingsOpen(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={insightsOpen} title="Insights" onClose={() => setInsightsOpen(false)}>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className={`px-2 py-1 rounded border text-xs ${insightsTab === "equity" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-500 dark:text-emerald-300" : "border-gray-200 dark:border-white/10 bg-transparent text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/5"}`}
+              onClick={() => setInsightsTab("equity")}
+            >
+              Equity
+            </button>
+            <button
+              type="button"
+              className={`px-2 py-1 rounded border text-xs ${insightsTab === "dist" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-500 dark:text-emerald-300" : "border-gray-200 dark:border-white/10 bg-transparent text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/5"}`}
+              onClick={() => setInsightsTab("dist")}
+            >
+              Distribution
+            </button>
+            <button
+              type="button"
+              className={`px-2 py-1 rounded border text-xs ${insightsTab === "symbol" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-500 dark:text-emerald-300" : "border-gray-200 dark:border-white/10 bg-transparent text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/5"}`}
+              onClick={() => setInsightsTab("symbol")}
+            >
+              Symbols
+            </button>
+            <button
+              type="button"
+              className={`px-2 py-1 rounded border text-xs ${insightsTab === "heatmap" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-500 dark:text-emerald-300" : "border-gray-200 dark:border-white/10 bg-transparent text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/5"}`}
+              onClick={() => setInsightsTab("heatmap")}
+            >
+              Heatmap
+            </button>
+          </div>
+          <button
+            type="button"
+            className="text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/15 border border-white/10 text-gray-200 disabled:opacity-50"
+            onClick={fetchStats}
+            disabled={statsBusy}
+          >
+            {statsBusy ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+
+        {!stats && (
+          <div className="text-sm text-gray-500">
+            {statsBusy ? "Loading..." : "No stats. Click Refresh."}
+          </div>
+        )}
+
+        {stats && (
+          <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="border border-gray-200 dark:border-white/10 rounded bg-gray-50 dark:bg-black/10 p-2">
+                <div className="text-[10px] text-gray-500">Current P/L</div>
+                <div className={`text-sm font-mono ${Number(stats.current?.summary?.total_pl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>{fmtMoney(Number(stats.current?.summary?.total_pl || 0))}</div>
+              </div>
+              <div className="border border-gray-200 dark:border-white/10 rounded bg-gray-50 dark:bg-black/10 p-2">
+                <div className="text-[10px] text-gray-500">Prev P/L</div>
+                <div className="text-sm font-mono">{stats.previous ? fmtMoney(Number(stats.previous?.summary?.total_pl || 0)) : "-"}</div>
+              </div>
+              <div className="border border-gray-200 dark:border-white/10 rounded bg-gray-50 dark:bg-black/10 p-2">
+                <div className="text-[10px] text-gray-500">Δ P/L</div>
+                <div className={`text-sm font-mono ${Number(stats.delta?.total_pl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>{stats.previous ? fmtMoney(Number(stats.delta?.total_pl || 0)) : "-"}</div>
+              </div>
+            </div>
+
+            {insightsTab === "equity" && (
+              <div className="border border-gray-200 dark:border-white/10 rounded bg-gray-50 dark:bg-black/10 p-3">
+                <div className="text-xs text-gray-500 mb-2">Equity & Drawdown</div>
+                <div className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={stats.current.equity_curve || []} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <XAxis dataKey="day" hide />
+                      <YAxis hide />
+                      <Tooltip contentStyle={{ backgroundColor: "var(--color-popover)", border: "1px solid var(--color-border)" }} labelStyle={{ color: "var(--color-foreground)" }} />
+                      <Line type="monotone" dataKey="equity" stroke="var(--color-foreground)" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="h-36 mt-3">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={stats.current.equity_curve || []} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <XAxis dataKey="day" hide />
+                      <YAxis hide />
+                      <Tooltip contentStyle={{ backgroundColor: "var(--color-popover)", border: "1px solid var(--color-border)" }} />
+                      <Area type="monotone" dataKey="drawdown" stroke="var(--color-destructive)" fill="var(--color-destructive)" fillOpacity={0.12} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {insightsTab === "dist" && (
+              <div className="border border-gray-200 dark:border-white/10 rounded bg-gray-50 dark:bg-black/10 p-3">
+                <div className="text-xs text-gray-500 mb-2">Daily P/L Distribution</div>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={stats.current.daily_pl || []}
+                      margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                    >
+                      <XAxis dataKey="day" hide />
+                      <YAxis hide />
+                      <Tooltip contentStyle={{ backgroundColor: "var(--color-popover)", border: "1px solid var(--color-border)" }} />
+                      <Bar dataKey="pl" barSize={10}>
+                        {(stats.current.daily_pl || []).map((x, i) => (
+                          <Cell key={i} fill={Number((x as any).pl || 0) >= 0 ? "rgba(16,185,129,0.75)" : "rgba(239,68,68,0.75)"} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {insightsTab === "symbol" && (
+              <div className="border border-gray-200 dark:border-white/10 rounded bg-gray-50 dark:bg-black/10 p-3">
+                <div className="text-xs text-gray-500 mb-2">By Symbol</div>
+                <div className="overflow-auto custom-scrollbar max-h-[55vh]">
+                  <table className="w-full text-[11px]">
+                    <thead className="sticky top-0 bg-white dark:bg-[#0b0f14]">
+                      <tr className="text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/10">
+                        <th className="text-left p-2">Symbol</th>
+                        <th className="text-right p-2">Trades</th>
+                        <th className="text-right p-2">Win%</th>
+                        <th className="text-right p-2">P/L</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(stats.current.by_symbol || [])
+                        .slice()
+                        .sort((a, b) => Math.abs(b.pl) - Math.abs(a.pl))
+                        .slice(0, 30)
+                        .map((x) => (
+                          <tr key={x.symbol} className="border-b border-gray-100 dark:border-white/5">
+                            <td className="p-2 text-gray-800 dark:text-gray-200">{x.symbol}</td>
+                            <td className="p-2 text-right font-mono text-gray-700 dark:text-gray-300">{x.trades}</td>
+                            <td className="p-2 text-right font-mono text-gray-700 dark:text-gray-300">{Number(x.win_rate || 0).toFixed(1)}%</td>
+                            <td className={`p-2 text-right font-mono ${x.pl >= 0 ? "text-emerald-400" : "text-red-400"}`}>{fmtMoney(x.pl)}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {insightsTab === "heatmap" && (
+              <div className="border border-gray-200 dark:border-white/10 rounded bg-gray-50 dark:bg-black/10 p-3">
+                <div className="text-xs text-gray-500 mb-2">Weekday / Session</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="border border-gray-200 dark:border-white/10 rounded p-2 bg-white/40 dark:bg-black/10">
+                    <div className="text-[11px] text-gray-500 mb-2">Weekday</div>
+                    <div className="grid grid-cols-7 gap-2">
+                      {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((lab, i) => {
+                        const it = (stats.current.by_weekday || []).find((x) => Number(x.weekday) === i);
+                        const pl = Number(it?.pl || 0);
+                        const pct = clamp(Math.abs(pl) / 500, 0, 1);
+                        const bg = pl >= 0 ? `rgba(16,185,129,${0.12 + pct * 0.35})` : `rgba(239,68,68,${0.12 + pct * 0.35})`;
+                        return (
+                          <div key={lab} className="rounded border border-gray-200 dark:border-white/10 p-2" style={{ background: bg }}>
+                            <div className="text-[10px] text-gray-500">{lab}</div>
+                            <div className={`text-[11px] font-mono ${pl >= 0 ? "text-emerald-500 dark:text-emerald-300" : "text-red-500 dark:text-red-300"}`}>{fmtMoney(pl)}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="border border-gray-200 dark:border-white/10 rounded p-2 bg-white/40 dark:bg-black/10">
+                    <div className="text-[11px] text-gray-500 mb-2">Session</div>
+                    <div className="flex flex-col gap-2">
+                      {(stats.current.by_session || []).map((x) => (
+                        <div key={x.session} className="flex items-center justify-between border border-gray-200 dark:border-white/10 rounded p-2 bg-white/30 dark:bg-black/10">
+                          <div className="text-[11px] text-gray-700 dark:text-gray-200">{x.session}</div>
+                          <div className={`text-[11px] font-mono ${Number(x.pl || 0) >= 0 ? "text-emerald-500 dark:text-emerald-300" : "text-red-500 dark:text-red-300"}`}>{fmtMoney(Number(x.pl || 0))}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
-
