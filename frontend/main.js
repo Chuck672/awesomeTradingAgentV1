@@ -9,8 +9,9 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let backendProcess = null;
+let mainWindow = null;
 
-function startBackend() {
+function startBackendAndCreateWindow() {
   const isDev = !app.isPackaged;
   let backendPath;
   let args = [];
@@ -28,21 +29,43 @@ function startBackend() {
     stdio: 'pipe'
   });
 
+  // Track if backend is ready
+  let isReady = false;
+
   backendProcess.stdout.on('data', (data) => {
-    console.log(`Backend: ${data}`);
+    const out = data.toString();
+    console.log(`Backend: ${out}`);
+    
+    // Look for Uvicorn startup message
+    if (!isReady && out.includes('Uvicorn running on http://0.0.0.0:8123')) {
+      isReady = true;
+      console.log('Backend is ready! Creating window now.');
+      createWindow();
+    }
   });
 
   backendProcess.stderr.on('data', (data) => {
-    console.error(`Backend Error: ${data}`);
+    console.error(`Backend Error: ${data.toString()}`);
   });
 
   backendProcess.on('close', (code) => {
     console.log(`Backend process exited with code ${code}`);
   });
+  
+  // Fallback: if we don't see the exact ready string within 15 seconds, just start the UI anyway
+  setTimeout(() => {
+    if (!isReady) {
+      console.log('Backend startup timeout (15s). Attempting to load UI anyway as fallback.');
+      isReady = true;
+      createWindow();
+    }
+  }, 15000);
 }
 
 function createWindow() {
-  const win = new BrowserWindow({
+  if (mainWindow) return;
+  
+  mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     webPreferences: {
@@ -53,16 +76,16 @@ function createWindow() {
 
   const isDev = !app.isPackaged;
   if (isDev) {
-    win.loadURL('http://localhost:3000');
+    mainWindow.loadURL('http://localhost:3000');
   } else {
     // Next.js static export paths
-    win.loadURL('app://-/index.html');
+    mainWindow.loadURL('app://-/index.html');
   }
 }
 
 app.whenReady().then(() => {
-  // Start the Python backend first
-  startBackend();
+  // Start the Python backend first, window will be created when backend is ready
+  startBackendAndCreateWindow();
 
   // Register custom protocol to bypass file:// absolute path issues
   protocol.registerFileProtocol('app', (request, callback) => {
@@ -92,8 +115,6 @@ app.whenReady().then(() => {
     }
     callback({ path: p });
   });
-
-  createWindow();
 });
 
 app.on('window-all-closed', () => {
@@ -112,7 +133,7 @@ app.on('will-quit', () => {
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (BrowserWindow.getAllWindows().length === 0 && backendProcess) {
     createWindow();
   }
 });

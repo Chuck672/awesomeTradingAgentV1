@@ -15,9 +15,9 @@ def get_llm(role: str, configs: dict | None = None) -> ChatOpenAI:
     configs = configs or {}
     role_config = configs.get(role, {}) if isinstance(configs, dict) else {}
 
-    req_base_url = role_config.get("base_url") or _base_url
-    req_model = role_config.get("model") or _model_name
-    req_api_key = role_config.get("api_key") or _api_key
+    req_base_url = role_config.get("base_url") or _base_url or "https://api.siliconflow.cn/v1"
+    req_model = role_config.get("model") or _model_name or "Qwen/Qwen2.5-7B-Instruct"
+    req_api_key = role_config.get("api_key") or _api_key or "sk-dummy"
 
     return ChatOpenAI(
         model=req_model,
