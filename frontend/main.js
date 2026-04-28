@@ -1,5 +1,8 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
+const serve = require('electron-serve');
+
+const loadURL = serve({ directory: 'out' });
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -15,8 +18,8 @@ function createWindow() {
   if (isDev) {
     win.loadURL('http://localhost:3000');
   } else {
-    // Next.js static export path
-    win.loadFile(path.join(__dirname, 'out/index.html'));
+    // Use electron-serve to serve the Next.js export instead of file://
+    loadURL(win);
   }
 }
 
