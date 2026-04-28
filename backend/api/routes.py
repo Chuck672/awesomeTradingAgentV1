@@ -36,6 +36,7 @@ from backend.services.alerts_store import list_alerts as alerts_list, create_ale
 from backend.domain.market.catalog import get_market_feature_catalog
 from backend.data_sources.mt5_source import MT5_AVAILABLE, mt5_source
 from backend.services.chart_scene import scene_engine, SceneParams
+from backend.services.trading_service import get_daily as trading_get_daily, get_day_detail as trading_get_day, build_rules_report
 import json
 import re
 
@@ -227,6 +228,59 @@ async def tools_gap_repair(payload: Dict[str, Any] = Body(default={})):
         await asyncio.sleep(0)
 
     return {"ok": True, "symbol": symbol, "timeframes": timeframes, "results": results}
+
+@router.get("/trading/daily")
+async def api_trading_daily(from_day: str = Query(...), to_day: str = Query(...)):
+    try:
+        return await asyncio.to_thread(trading_get_daily, from_day=from_day, to_day=to_day)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/trading/day")
+async def api_trading_day(day: str = Query(...)):
+    try:
+        return await asyncio.to_thread(trading_get_day, day=day)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/trading/coach")
+async def api_trading_coach(payload: Dict[str, Any] = Body(default={})):
+    from_day = str(payload.get("from_day") or "").strip()
+    to_day = str(payload.get("to_day") or "").strip()
+    configs = payload.get("configs") if isinstance(payload.get("configs"), dict) else {}
+    if not from_day or not to_day:
+        raise HTTPException(status_code=400, detail="from_day and to_day are required")
+    rep = await asyncio.to_thread(trading_get_daily, from_day=from_day, to_day=to_day)
+    days = rep.get("days") if isinstance(rep, dict) else None
+    if not isinstance(days, list):
+        raise HTTPException(status_code=500, detail="invalid daily response")
+    rules = build_rules_report(days)
+    try:
+        from backend.services.ai.llm_factory import get_llm
+        from langchain_core.messages import HumanMessage
+
+        llm = get_llm("analyzer", configs)
+        msg = await asyncio.to_thread(
+            llm.invoke,
+            [
+                HumanMessage(
+                    content=(
+                        "你是交易教练。你将收到一个交易绩效 summary 与 issues（规则引擎输出）。\n"
+                        "请用中文输出：\n"
+                        "1) 本周期一句话总结\n"
+                        "2) 3 条最重要的改善项（每条包含：问题->证据(引用具体数字)->建议动作/参数）\n"
+                        "3) 下一周期行动计划（最多 5 条）\n"
+                        "要求：必须引用输入 JSON 中的具体数字；不要输出与输入矛盾的结论；不要输出代码块。\n\n"
+                        "规则引擎 JSON:\n"
+                        + json.dumps(rules, ensure_ascii=False)
+                    )
+                )
+            ],
+        )
+        coach_text = str(getattr(msg, "content", "") or "").strip()
+    except Exception as e:
+        coach_text = f"(coach_failed) {str(e)}"
+    return {"ok": True, "from": from_day, "to": to_day, "rules": rules, "coach": coach_text}
 
 @router.get("/symbols")
 async def get_symbols():

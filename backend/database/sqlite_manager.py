@@ -152,6 +152,42 @@ class SQLiteManager:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_strategy_gate_key ON strategy_gate_decisions(candidate_key)")
             
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS trade_deals (
+                    account_id TEXT,
+                    ticket INTEGER,
+                    time INTEGER,
+                    symbol TEXT,
+                    type INTEGER,
+                    entry INTEGER,
+                    volume REAL,
+                    price REAL,
+                    profit REAL,
+                    commission REAL,
+                    swap REAL,
+                    position_id INTEGER,
+                    comment TEXT,
+                    raw_json TEXT,
+                    PRIMARY KEY(account_id, ticket)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trade_deals_time ON trade_deals(account_id, time)")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS trade_daily (
+                    account_id TEXT,
+                    day TEXT,
+                    pl REAL,
+                    trades INTEGER,
+                    winning_trades INTEGER,
+                    gross_profit REAL,
+                    gross_loss REAL,
+                    fees REAL,
+                    PRIMARY KEY(account_id, day)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trade_daily_day ON trade_daily(account_id, day)")
+
             conn.commit()
 
     # ==========================================
