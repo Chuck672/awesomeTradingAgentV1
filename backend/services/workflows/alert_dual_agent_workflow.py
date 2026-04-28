@@ -139,35 +139,66 @@ class AlertDualAgentWorkflow:
         analyzer_llm = get_llm("analyzer", configs)
         await agent_comm.broadcast_status(session_id, "analyzer", "thinking", "Analyzing event...")
         t1 = time.perf_counter()
-        msg = await asyncio.to_thread(
-            analyzer_llm.invoke,
-            [
-                HumanMessage(
-                    content=(
-                        analyzer_prompt
-                        + "\n\nDecision State JSON:\n```json\n"
-                        + json.dumps(
-                            decision_state,
-                            ensure_ascii=False,
+
+        from pydantic import BaseModel, Field
+        from typing import Optional, List
+        
+        class AnalyzerPlan(BaseModel):
+            signal: str = Field(description="Trading signal: buy, sell, or hold")
+            confidence: float = Field(description="Confidence score of the signal, 0.0 to 100.0")
+            entry_type: Optional[str] = Field(None, description="Type of entry: market, limit, or stop")
+            entry_price: Optional[float] = Field(None, description="Suggested entry price level")
+            stop_loss: Optional[float] = Field(None, description="Suggested stop loss price level")
+            take_profit: Optional[float] = Field(None, description="Suggested take profit price level")
+            risk_reward_ratio: Optional[float] = Field(None, description="Risk to reward ratio")
+            evidence_refs: Optional[List[str]] = Field(None, description="List of evidence references")
+            invalidation_condition: Optional[str] = Field(None, description="Condition that invalidates the trade")
+            trade_horizon: Optional[str] = Field(None, description="Expected time horizon for the trade")
+
+        try:
+            # 引入 Structured Output 强制约束输出格式，杜绝解析异常
+            structured_llm = analyzer_llm.with_structured_output(AnalyzerPlan)
+            msg = await asyncio.to_thread(
+                structured_llm.invoke,
+                [
+                    HumanMessage(
+                        content=(
+                            analyzer_prompt
+                            + "\n\nDecision State JSON:\n```json\n"
+                            + json.dumps(
+                                decision_state,
+                                ensure_ascii=False,
+                            )
+                            + "\n```"
+                            + "\n\n事件触发描述:\n"
+                            + str(trigger_text)
+                            + "\n\n上下文 JSON:\n```json\n"
+                            + context_json
+                            + "\n```"
                         )
-                        + "\n```"
-                        + "\n\n事件触发描述:\n"
-                        + str(trigger_text)
-                        + "\n\n上下文 JSON:\n```json\n"
-                        + context_json
-                        + "\n```"
                     )
-                )
-            ],
-        )
-        analyzer_ms = int((time.perf_counter() - t1) * 1000)
-        analyzer_text = getattr(msg, "content", "") or ""
+                ],
+            )
+            analyzer_ms = int((time.perf_counter() - t1) * 1000)
+            
+            # 由于使用的是 Structured Output，msg 直接是 AnalyzerPlan 对象
+            if msg:
+                analyzer_plan = msg.model_dump()
+                analyzer_text = json.dumps(analyzer_plan, ensure_ascii=False, indent=2)
+            else:
+                analyzer_plan = {}
+                analyzer_text = "{}"
+        except Exception as e:
+            logger.exception("event_dual analyzer_structured_output_failed session=%s err=%s", session_id, str(e))
+            analyzer_ms = int((time.perf_counter() - t1) * 1000)
+            analyzer_plan = {}
+            analyzer_text = f"{{\"error\": \"{str(e)}\"}}"
+
         report_lines.append(f"**Analyzer**: {analyzer_text}")
         await agent_comm.broadcast_status(session_id, "analyzer", "finished", analyzer_text)
 
-        analyzer_plan = _extract_json_object(analyzer_text)
         analyzer_plan_json = ""
-        if isinstance(analyzer_plan, dict):
+        if isinstance(analyzer_plan, dict) and analyzer_plan:
             try:
                 analyzer_plan_json = json.dumps(analyzer_plan, ensure_ascii=False)
             except Exception:
