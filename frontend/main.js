@@ -10,6 +10,7 @@ protocol.registerSchemesAsPrivileged([
 
 let backendProcess = null;
 let mainWindow = null;
+let splashWindow = null;
 
 function startBackendAndCreateWindow() {
   const isDev = !app.isPackaged;
@@ -62,16 +63,38 @@ function startBackendAndCreateWindow() {
   }, 15000);
 }
 
+function createSplashWindow() {
+  splashWindow = new BrowserWindow({
+    width: 400,
+    height: 300,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+  splashWindow.loadFile(path.join(__dirname, 'splash.html'));
+}
+
 function createWindow() {
   if (mainWindow) return;
   
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
+    title: "AwesomeTradingAgentV1",
+    show: false, // hide until ready to prevent white flash
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
     },
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    if (splashWindow) {
+      splashWindow.close();
+      splashWindow = null;
+    }
+    mainWindow.show();
   });
 
   const isDev = !app.isPackaged;
@@ -84,6 +107,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Create splash screen first
+  createSplashWindow();
+
   // Start the Python backend first, window will be created when backend is ready
   startBackendAndCreateWindow();
 

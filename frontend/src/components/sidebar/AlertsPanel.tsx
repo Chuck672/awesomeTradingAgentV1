@@ -17,6 +17,22 @@ type AlertEvent = { id: number; alert_id: number; ts: number; message: string };
 
 type AIReport = { id: number; alert_id: number; session_id: string; ts: number; report_content: string; alert_name: string };
 
+
+const ALERT_AGENT_SETTINGS_KEY = "awesome_alerts_agent_settings_v1";
+
+function loadAlertAgentSettings() {
+  try {
+    const raw = localStorage.getItem(ALERT_AGENT_SETTINGS_KEY);
+    return raw ? JSON.parse(raw) : { base_url: "https://api.siliconflow.cn/v1", model: "deepseek-ai/DeepSeek-V3", api_key: "" };
+  } catch {
+    return { base_url: "https://api.siliconflow.cn/v1", model: "deepseek-ai/DeepSeek-V3", api_key: "" };
+  }
+}
+
+function saveAlertAgentSettings(v: any) {
+  localStorage.setItem(ALERT_AGENT_SETTINGS_KEY, JSON.stringify(v || {}));
+}
+
 const TG_KEY = "awesome_chart_telegram_settings_v1";
 const ALERT_CREATE_COLLAPSED_KEY = "awesome_chart_alert_create_collapsed_v1";
 const AI_REPORTS_LAST_SEEN_TS_KEY = "awesome_chart_ai_reports_last_seen_ts_v1";
@@ -94,6 +110,8 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   const [enableTg, setEnableTg] = useState(false);
   const [showTgSettings, setShowTgSettings] = useState(false);
   const [tg, setTg] = useState<{ token: string; chat_id: string }>(() => ({ token: "", chat_id: "" }));
+  const [agentSettings, setAgentSettings] = useState(loadAlertAgentSettings());
+  const [showAgentSettingsModal, setShowAgentSettingsModal] = useState(false);
   const [createCollapsed, setCreateCollapsed] = useState(true);
   const [lastSeenReportTs, setLastSeenReportTs] = useState(0);
 
@@ -291,14 +309,12 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
         },
       };
 
-      // Inject Agent Configs from local storage so the backend has API keys to run the agent
+      // Inject Agent Configs from dedicated Alert settings
       try {
-        const rawSettings = localStorage.getItem("awesome_trading_agent_settings_v3");
-        if (rawSettings) {
-          const s = JSON.parse(rawSettings);
-          if (s.configs) {
-            Object.assign(rule.agent_configs, s.configs);
-          }
+        const s = agentSettings;
+        if (s && s.api_key) {
+          rule.agent_configs.analyzer = { base_url: s.base_url, model: s.model, api_key: s.api_key };
+          rule.agent_configs.supervisor = { base_url: s.base_url, model: s.model, api_key: s.api_key };
         }
       } catch (e) {}
 
@@ -377,6 +393,14 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-gray-200">AI Agent Triggers</div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowAgentSettingsModal(true)}
+            className="flex items-center gap-1.5 px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-xs text-white transition-colors"
+            title="Agent Settings"
+            type="button"
+          >
+            <Settings size={14} />
+          </button>
           <button
             onClick={async () => {
               await loadAnalyzerPrompt();
@@ -949,6 +973,70 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
               >
                 Save
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showAgentSettingsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-[#1e1e1e] border border-white/10 rounded-lg shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-3 border-b border-white/10 bg-white/5">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Settings size={16} className="text-blue-400" />
+                Alert Agent Settings
+              </h3>
+              <button onClick={() => setShowAgentSettingsModal(false)} className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-gray-400">Base URL</label>
+                <input
+                  type="text"
+                  value={agentSettings.base_url}
+                  onChange={(e) => setAgentSettings({ ...agentSettings, base_url: e.target.value })}
+                  className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
+                  placeholder="https://api.siliconflow.cn/v1"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-gray-400">Model</label>
+                <input
+                  type="text"
+                  value={agentSettings.model}
+                  onChange={(e) => setAgentSettings({ ...agentSettings, model: e.target.value })}
+                  className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
+                  placeholder="deepseek-ai/DeepSeek-V3"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-gray-400">API Key</label>
+                <input
+                  type="password"
+                  value={agentSettings.api_key}
+                  onChange={(e) => setAgentSettings({ ...agentSettings, api_key: e.target.value })}
+                  className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
+                  placeholder="sk-..."
+                />
+              </div>
+            </div>
+            <div className="p-3 border-t border-white/10 bg-black/20 flex justify-end gap-2">
+              <button
+                onClick={() => setShowAgentSettingsModal(false)}
+                className="px-3 py-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  saveAlertAgentSettings(agentSettings);
+                  setShowAgentSettingsModal(false);
+                }}
+                className="px-4 py-1.5 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 hover:text-blue-300 border border-blue-500/30 rounded text-xs transition-colors"
+              >
+                Save
+              </button>
             </div>
           </div>
         </div>
