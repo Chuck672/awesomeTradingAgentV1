@@ -13,6 +13,14 @@ from backend.services.tools.drawing_tools import draw_clear_ai, draw_objects, dr
 logger = logging.getLogger(__name__)
 
 
+def _safe_float(val) -> float:
+    if val is None:
+        return 0.0
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return 0.0
+
 class AlertDualAgentWorkflow:
     @staticmethod
     async def run(
@@ -194,7 +202,7 @@ class AlertDualAgentWorkflow:
             analyzer_plan = {}
             analyzer_text = f"{{\"error\": \"{str(e)}\"}}"
 
-        report_lines.append(f"**Analyzer**: {analyzer_text}")
+        report_lines.append(f"**Analyzer**: \n{analyzer_text}")
         await agent_comm.broadcast_status(session_id, "analyzer", "finished", analyzer_text)
 
         analyzer_plan_json = ""
