@@ -3,7 +3,6 @@
 import React, { useMemo } from "react";
 import { X } from "lucide-react";
 import { AgentAdvisorPanel } from "./AgentAdvisorPanel";
-import { ChatStrategyPanel } from "./ChatStrategyPanel";
 import { AlertsPanel } from "./AlertsPanel";
 import { PipelineWorkbenchPanel } from "./PipelineWorkbenchPanel";
 import { PatternInspectorPanel } from "./PatternInspectorPanel";
@@ -79,7 +78,6 @@ export function RightPanel(props: {
 
   const title = useMemo(() => {
     if (panel === "agent") return "Agent System";
-    if (panel === "chat") return "Chat / Strategy";
     if (panel === "alerts") return "Alerts";
     if (panel === "scan") return "Pipeline";
     if (panel === "patterns") return "Patterns Inspector";
@@ -123,7 +121,6 @@ export function RightPanel(props: {
             onCaptureScreenshot={onRequestScreenshot}
           />
         )}
-        {panel === "chat" && <ChatStrategyPanel />}
         {panel === "alerts" && <AlertsPanel symbol={symbol} timeframe={timeframe} />}
         {panel === "scan" && <PipelineWorkbenchPanel onExecuteActions={(actions) => (onAiExecuteActions ? onAiExecuteActions(actions) : [])} />}
         {panel === "patterns" && <PatternInspectorPanel symbol={symbol} timeframe={timeframe} onExecuteActions={onAiExecuteActions} />}

@@ -44,7 +44,7 @@ class ReplayService:
                 # We might need a new method in historical_service for this, or use raw DuckDB query.
                 
                 # Let's write a direct query for now or assume we can add it to historical_service
-                from backend.api.dependencies import get_current_broker_deps
+                from backend.core.broker_context import get_current_broker_deps
                 deps = get_current_broker_deps()
                 if not deps:
                     break

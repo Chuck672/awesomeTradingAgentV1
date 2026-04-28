@@ -10,7 +10,8 @@ from backend.services.chart_scene.indicators import (
     calc_msb_zigzag,
     calc_trend_exhaustion
 )
-from backend.services.ai.agent_tools import build_agent_context, analyzer_tool_schemas, executor_tool_schemas
+from backend.services.ai.agent_context_builder import build_agent_context
+from backend.services.ai.agent_tools import analyzer_tool_schemas, executor_tool_schemas
 
 def test_indicators():
     print("=== Testing Python Indicators ===")

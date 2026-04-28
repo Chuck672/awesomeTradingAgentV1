@@ -12,13 +12,17 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "electron/**",
+    "capture.js",
+    "test_mstm.js",
   ]),
   {
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "prefer-const": "off",
       "@typescript-eslint/no-unused-vars": "off",
-      "react-hooks/exhaustive-deps": "off"
+      "react-hooks/exhaustive-deps": "off",
+      "react-hooks/set-state-in-effect": "off",
     }
   }
 ]);

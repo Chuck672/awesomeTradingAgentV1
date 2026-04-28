@@ -679,6 +679,9 @@ export const SingleChart = forwardRef<ChartRef, SingleChartProps>(({
     let ws: WebSocket | null = null;
     let isMounted = true;
     let timeoutId: ReturnType<typeof setTimeout>;
+    let pingId: ReturnType<typeof setInterval> | null = null;
+    let retryCount = 0;
+    let manualClose = false;
     
     const connectWS = () => {
       const wsHost = getWsUrl();
@@ -688,6 +691,19 @@ export const SingleChart = forwardRef<ChartRef, SingleChartProps>(({
       
       ws.onopen = () => {
         console.log(`WebSocket connected: ${symbol} ${timeframe}`);
+        retryCount = 0;
+        if (pingId) clearInterval(pingId);
+        pingId = setInterval(() => {
+          try {
+            ws?.send("ping");
+          } catch {}
+        }, 20000);
+      };
+
+      ws.onerror = () => {
+        try {
+          ws?.close();
+        } catch {}
       };
       
       ws.onmessage = (event) => {
@@ -695,24 +711,25 @@ export const SingleChart = forwardRef<ChartRef, SingleChartProps>(({
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === "update" && msg.data) {
-            // Update data array
             const newBar = msg.data;
-            setData(prev => {
-              // If it's a new bar or update to current bar
-              const lastBar = prev[prev.length - 1];
-              if (lastBar && lastBar.time === newBar.time) {
-                // Update existing
-                const updated = [...prev];
-                updated[updated.length - 1] = newBar;
-                return updated;
-              } else if (!lastBar || newBar.time > lastBar.time) {
-                // Append new
-                const next = [...prev, newBar];
-                if (next.length > MAX_BARS) return next.slice(next.length - MAX_BARS);
-                return next;
+            const last = dataRef.current?.[dataRef.current.length - 1];
+            if (last && Number(newBar.time) < Number(last.time)) return;
+            const isNewBar = !last || last.time !== newBar.time;
+            const nextData = isNewBar
+              ? [...(dataRef.current || []), newBar]
+              : [...(dataRef.current || []).slice(0, -1), newBar];
+            const trimmed = nextData.length > MAX_BARS ? nextData.slice(nextData.length - MAX_BARS) : nextData;
+            dataRef.current = trimmed as any;
+
+            try {
+              if (seriesRef.current && !isReplayModeRef.current) {
+                seriesRef.current.update(newBar);
               }
-              return prev;
-            });
+            } catch {}
+
+            if (isNewBar) {
+              setData([...trimmed] as any);
+            }
           }
         } catch (e) {
           console.error("WS message error", e);
@@ -721,9 +738,12 @@ export const SingleChart = forwardRef<ChartRef, SingleChartProps>(({
       
       ws.onclose = () => {
         console.log(`WebSocket disconnected: ${symbol} ${timeframe}`);
+        if (manualClose) return;
         if (isMounted) {
-          // Reconnect after 3 seconds
-          timeoutId = setTimeout(connectWS, 3000);
+          retryCount += 1;
+          const base = Math.min(30_000, 1000 * Math.pow(2, Math.min(6, retryCount)));
+          const jitter = Math.floor(Math.random() * 500);
+          timeoutId = setTimeout(connectWS, base + jitter);
         }
       };
     };
@@ -732,10 +752,17 @@ export const SingleChart = forwardRef<ChartRef, SingleChartProps>(({
     
     return () => {
       isMounted = false;
+      manualClose = true;
       if (timeoutId) clearTimeout(timeoutId);
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.onclose = null;
-        ws.close();
+      if (pingId) clearInterval(pingId);
+      if (ws) {
+        try {
+          ws.onopen = null;
+          ws.onmessage = null;
+          ws.onerror = null;
+          ws.onclose = null;
+          ws.close();
+        } catch {}
       }
     };
   }, [symbol, timeframe]);

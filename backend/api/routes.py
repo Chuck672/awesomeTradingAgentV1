@@ -33,6 +33,7 @@ from backend.services.strategy.executor_v1 import execute_ir_v1
 from backend.services.ai.chart_tools import tool_schemas as ai_tool_schemas, system_prompt as ai_system_prompt, parse_tool_calls as ai_parse_tool_calls
 from backend.services.watchlist_store import list_watchlist, add_symbol as watchlist_add_symbol, remove_symbol as watchlist_remove_symbol
 from backend.services.alerts_store import list_alerts as alerts_list, create_alert as alerts_create, delete_alert as alerts_delete, set_enabled as alerts_set_enabled, list_events as alerts_list_events, list_ai_reports as alerts_list_reports
+from backend.domain.market.catalog import get_market_feature_catalog
 from backend.data_sources.mt5_source import MT5_AVAILABLE, mt5_source
 from backend.services.chart_scene import scene_engine, SceneParams
 import json
@@ -2395,6 +2396,11 @@ async def api_strategy_capabilities_v2():
     return {"ok": True, **(load_capabilities_config() or {})}
 
 
+@router.get("/market/features/catalog")
+async def api_market_features_catalog():
+    return {"ok": True, "catalog": get_market_feature_catalog()}
+
+
 @router.post("/strategy/schema/v2/compile")
 async def api_strategy_schema_v2_compile(payload: Dict[str, Any] = Body(default={})):
     """
@@ -2648,16 +2654,62 @@ async def api_watchlist_remove(payload: Dict[str, Any] = Body(default={})):
 
 @router.get("/alerts")
 async def api_alerts_list():
-    return {"alerts": alerts_list()}
+    return {"alerts": await asyncio.to_thread(alerts_list)}
 
 
 @router.get("/alerts/events")
 async def api_alerts_events(limit: int = Query(100)):
-    return {"events": alerts_list_events(int(limit))}
+    return {"events": await asyncio.to_thread(alerts_list_events, int(limit))}
+
+@router.post("/alerts/events/clear")
+async def api_alerts_events_clear(payload: Dict[str, Any] = Body(default={})):
+    aid = payload.get("alert_id")
+    try:
+        aid = int(aid) if aid is not None else None
+    except Exception:
+        aid = None
+    from backend.services.alerts_store import clear_events
+
+    n = await asyncio.to_thread(clear_events, aid)
+    return {"ok": True, "deleted": int(n)}
+
 
 @router.get("/alerts/reports")
 async def api_alerts_reports(limit: int = Query(50)):
-    return {"reports": alerts_list_reports(int(limit))}
+    return {"reports": await asyncio.to_thread(alerts_list_reports, int(limit))}
+
+
+@router.post("/alerts/reports/clear")
+async def api_alerts_reports_clear(payload: Dict[str, Any] = Body(default={})):
+    aid = payload.get("alert_id")
+    try:
+        aid = int(aid) if aid is not None else None
+    except Exception:
+        aid = None
+    from backend.services.alerts_store import clear_ai_reports
+
+    n = await asyncio.to_thread(clear_ai_reports, aid)
+    return {"ok": True, "deleted": int(n)}
+
+
+@router.get("/alerts/analyzer-prompt")
+async def api_alerts_analyzer_prompt_get():
+    from backend.services.ai.prompt_library import load_alert_analyzer_prompt
+
+    text = await asyncio.to_thread(load_alert_analyzer_prompt)
+    return {"prompt": str(text or "").rstrip("\n")}
+
+
+@router.post("/alerts/analyzer-prompt")
+async def api_alerts_analyzer_prompt_set(payload: Dict[str, Any] = Body(default={})):
+    from backend.services.alerts_store import set_analyzer_system_prompt
+
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str):
+        raise HTTPException(status_code=400, detail="prompt must be a string")
+    await asyncio.to_thread(set_analyzer_system_prompt, prompt)
+    return {"ok": True}
+
 
 
 @router.post("/alerts/create")
@@ -2666,7 +2718,7 @@ async def api_alerts_create(payload: Dict[str, Any] = Body(default={})):
     rule = payload.get("rule") if isinstance(payload.get("rule"), dict) else {}
     if not rule or not rule.get("type"):
         raise HTTPException(status_code=400, detail="rule.type is required")
-    aid = alerts_create(name, rule, enabled=bool(payload.get("enabled", True)))
+    aid = await asyncio.to_thread(alerts_create, name, rule, bool(payload.get("enabled", True)))
     return {"ok": True, "id": aid}
 
 
@@ -2675,7 +2727,7 @@ async def api_alerts_delete(payload: Dict[str, Any] = Body(default={})):
     aid = int(payload.get("id") or 0)
     if aid <= 0:
         raise HTTPException(status_code=400, detail="id is required")
-    alerts_delete(aid)
+    await asyncio.to_thread(alerts_delete, aid)
     return {"ok": True}
 
 
@@ -2685,7 +2737,7 @@ async def api_alerts_toggle(payload: Dict[str, Any] = Body(default={})):
     enabled = bool(payload.get("enabled", True))
     if aid <= 0:
         raise HTTPException(status_code=400, detail="id is required")
-    alerts_set_enabled(aid, enabled)
+    await asyncio.to_thread(alerts_set_enabled, aid, enabled)
     return {"ok": True}
 
 

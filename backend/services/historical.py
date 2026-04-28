@@ -2,7 +2,7 @@ import glob
 import logging
 from typing import Any, Dict, List
 
-from backend.api.dependencies import get_current_broker_deps
+from backend.core.broker_context import get_current_broker_deps
 
 logger = logging.getLogger(__name__)
 

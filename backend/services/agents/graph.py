@@ -4,11 +4,11 @@ from typing import Annotated, Literal, TypedDict, Any, List, Dict
 from pydantic import BaseModel, Field
 
 from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
+from backend.services.ai.llm_factory import get_llm
 
 # 1. State Definition
 class AgentState(TypedDict):
@@ -17,7 +17,7 @@ class AgentState(TypedDict):
     active_tool_groups: list[str]  # 动态注入的工具组权限
 
 # 2. Define Real Tools for Analyzer
-from backend.services.ai.agent_tools import build_agent_context
+from backend.services.ai.agent_context_builder import build_agent_context
 
 @tool
 def get_market_context(symbol: str = "XAUUSDz", timeframe: str = "M15") -> str:
@@ -125,26 +125,13 @@ def data_query_economic_calendar() -> str:
     """获取未来 24/48 小时的重大财经日历数据。"""
     return "No major economic events in the next 48 hours."
 
-# -----------------------------
-# 5.3 绘图分析管理 (Drawing & Overlays) - VISUAL_ANNOTATION
-# -----------------------------
-@tool
-def draw_objects(objects: list[dict]) -> str:
-    """通用绘图入口。支持画线(hline, trendline)、标记(marker)和图形(box, arrow)。
-    objects: 一组绘图对象的列表，例如 [{"type": "hline", "price": 1.10, "color": "#ef4444", "lineWidth": 2, "lineStyle": "dashed"}, {"type": "marker", "time": 1612131, "position": "belowBar", "text": "Buy", "color": "#22c55e"}]
-    你可以指定 color 属性（如 "#ef4444" 表示红色, "#22c55e" 表示绿色, "#3b82f6" 表示蓝色），lineWidth（线宽），lineStyle（线型：solid/dashed/dotted）。
-    """
-    return f"Successfully sent UI command to draw objects"
-
-@tool
-def draw_clear_all() -> str:
-    """移除图表上的所有手动或 AI 绘制的线条和标记。"""
-    return "Successfully sent UI command to clear all drawings"
-
-@tool
-def draw_remove_object(id: str) -> str:
-    """移除特定的绘图对象。"""
-    return f"Successfully sent UI command to remove drawing {id}"
+from backend.services.tools.drawing_tools import (
+    draw_objects,
+    draw_clear_all,
+    draw_clear_ai,
+    draw_remove_object,
+    execute_ui_action,
+)
 
 # -----------------------------
 # 5.4 指标视图管理 (Indicator Management) - INDICATOR_CONTROL
@@ -158,57 +145,6 @@ def indicator_toggle(id: str, visible: bool) -> str:
 def indicator_clear_all() -> str:
     """移除或隐藏图表上的所有指标，恢复纯净 K 线图。"""
     return "Successfully sent UI command to clear all indicators"
-
-# Backward compatibility executor tool
-@tool
-def execute_ui_action(
-    action: str = None,
-    type: str = None, 
-    price: float = None, 
-    time: int = None, 
-    color: str = None, 
-    text: str = None,
-    position: str = None,
-    shape: str = None,
-    t1: int = None,
-    t2: int = None,
-    p1: float = None,
-    p2: float = None,
-    objects: list = None
-) -> str:
-    """Emit a JSON action to the frontend to draw lines, markers or update the chart."""
-    cmd = {k: v for k, v in locals().items() if v is not None and k != "cmd"}
-    
-    # If the LLM generates `type` instead of `action`, map it back to `action` for backward compatibility
-    # so the frontend's JSON parser `if (action.action)` can definitely catch it
-    if "type" in cmd and "action" not in cmd:
-        cmd["action"] = cmd["type"]
-        
-    return f"Successfully sent UI command: {json.dumps(cmd)}"
-
-# 4. Read API config from environment
-from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "siliconflow_api.env"))
-
-base_url = os.getenv("Base_URL")
-model_name = os.getenv("Model")
-api_key = os.getenv("API_Key")
-
-def get_llm(role: str, configs: dict = None):
-    configs = configs or {}
-    role_config = configs.get(role, {})
-    
-    # Fallback to environment variables if not provided
-    req_base_url = role_config.get("base_url") or base_url
-    req_model = role_config.get("model") or model_name
-    req_api_key = role_config.get("api_key") or api_key
-    
-    return ChatOpenAI(
-        model=req_model,
-        openai_api_key=req_api_key,
-        openai_api_base=req_base_url,
-        max_tokens=2048,
-    )
 
 # 5. Build Agents
 def build_multi_agent_graph(configs: dict = None):
@@ -276,7 +212,7 @@ def build_multi_agent_graph(configs: dict = None):
         "严格约束: \n"
         "1. 必须动手: 严禁只用文本回复“我已执行”或“请查收”。你必须真实地触发 Tool Call！\n"
         "2. 提取上下文: 从 Analyzer 的回复中提取精确的价格数值（如 4746.222），作为画线的 `price` 等参数传入工具。\n"
-        "3. 视觉配置: 当用户要求特定颜色或样式时，为 draw_objects 的元素添加 color (如 '#ef4444' 红, '#22c55e' 绿) 或 lineStyle ('dashed')。\n"
+        "3. 视觉配置(强制规范): 若画的是交易三要素 Entry/TP/SL，必须固定颜色：Entry '#3b82f6'（蓝），TP '#22c55e'（绿），SL '#ef4444'（红）。无论用户是否指定颜色都必须遵守；用户自定义颜色仅适用于非 Entry/TP/SL 的其他绘图对象。若用户要求虚线/样式，才设置 lineStyle（如 'dashed'）。\n"
         "4. 废话过滤: 工具调用成功后，只输出“已成功执行动作。” 严禁说“如果需要其他帮助请随时告知”这种废话。\n"
         "执行结束后，请在末尾输出 'FINISHED'。"
     )

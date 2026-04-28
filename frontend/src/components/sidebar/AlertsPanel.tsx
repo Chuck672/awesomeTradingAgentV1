@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Settings, Inbox, X } from "lucide-react";
+import { Settings, Inbox, X, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 
 type AlertRow = {
   id: number;
@@ -17,6 +17,8 @@ type AlertEvent = { id: number; alert_id: number; ts: number; message: string };
 type AIReport = { id: number; alert_id: number; session_id: string; ts: number; report_content: string; alert_name: string };
 
 const TG_KEY = "awesome_chart_telegram_settings_v1";
+const ALERT_CREATE_COLLAPSED_KEY = "awesome_chart_alert_create_collapsed_v1";
+const AI_REPORTS_LAST_SEEN_TS_KEY = "awesome_chart_ai_reports_last_seen_ts_v1";
 
 function loadTelegram() {
   try {
@@ -31,6 +33,36 @@ function saveTelegram(v: any) {
   localStorage.setItem(TG_KEY, JSON.stringify(v || {}));
 }
 
+function loadNumber(key: string, fallback: number) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveNumber(key: string, v: number) {
+  try {
+    localStorage.setItem(key, String(v));
+  } catch {}
+}
+
+async function readJsonOrThrow(r: Response) {
+  const text = await r.text();
+  if (!r.ok) {
+    throw new Error(text || `HTTP ${r.status}`);
+  }
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(text);
+  }
+}
+
 export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
   const [events, setEvents] = useState<AlertEvent[]>([]);
@@ -38,20 +70,31 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   const [err, setErr] = useState<string | null>(null);
   const [showReportsModal, setShowReportsModal] = useState(false);
   const [selectedReportId, setSelectedReportId] = useState<number | null>(null);
+  const [showAnalyzerPromptModal, setShowAnalyzerPromptModal] = useState(false);
+  const [analyzerPrompt, setAnalyzerPrompt] = useState("");
+  const [analyzerPromptDirty, setAnalyzerPromptDirty] = useState(false);
   
   const [symbol, setSymbol] = useState(props.symbol || "XAUUSD");
   const [timeframe, setTimeframe] = useState(props.timeframe || "M15");
-  const [alertType, setAlertType] = useState<"raja_sr_touch" | "msb_zigzag_break" | "trend_exhaustion">("raja_sr_touch");
+  const [alertType, setAlertType] = useState<"raja_sr_touch" | "msb_zigzag_break" | "trend_exhaustion" | "detector_trigger">("detector_trigger");
   
   // Specific settings
   const [cooldown, setCooldown] = useState(30);
   const [detectBos, setDetectBos] = useState(true);
   const [detectChoch, setDetectChoch] = useState(true);
   const [initialPrompt, setInitialPrompt] = useState("");
+  const [featureCatalog, setFeatureCatalog] = useState<any>(null);
+  const [contextEnabled, setContextEnabled] = useState<Record<string, boolean>>({});
+  const [contextParams, setContextParams] = useState<Record<string, any>>({});
+  const [triggerEnabled, setTriggerEnabled] = useState<Record<string, boolean>>({});
+  const [triggerParams, setTriggerParams] = useState<Record<string, any>>({});
+  const [triggerTimeframe, setTriggerTimeframe] = useState<string>(() => (props.timeframe || "M15"));
 
   const [enableTg, setEnableTg] = useState(false);
   const [showTgSettings, setShowTgSettings] = useState(false);
   const [tg, setTg] = useState<{ token: string; chat_id: string }>(() => ({ token: "", chat_id: "" }));
+  const [createCollapsed, setCreateCollapsed] = useState(true);
+  const [lastSeenReportTs, setLastSeenReportTs] = useState(0);
 
   useEffect(() => {
     const loadedTg = loadTelegram();
@@ -60,17 +103,112 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
       setEnableTg(true);
     }
   }, []);
+  useEffect(() => {
+    setCreateCollapsed(!!loadNumber(ALERT_CREATE_COLLAPSED_KEY, 1));
+    setLastSeenReportTs(loadNumber(AI_REPORTS_LAST_SEEN_TS_KEY, 0));
+  }, []);
   useEffect(() => setSymbol(props.symbol || "XAUUSD"), [props.symbol]);
   useEffect(() => setTimeframe(props.timeframe || "M15"), [props.timeframe]);
+  useEffect(() => setTriggerTimeframe(props.timeframe || "M15"), [props.timeframe]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const cat = await fetch("/api/market/features/catalog").then(readJsonOrThrow);
+        setFeatureCatalog(cat);
+      } catch (e: any) {
+        setErr(e?.message || "Failed to load feature catalog");
+      }
+    })();
+  }, []);
+
+  const patternCatalogItems = useMemo(() => {
+    const groups = featureCatalog?.groups;
+    if (!Array.isArray(groups)) return [];
+    const g = groups.find((x: any) => x?.id === "patterns");
+    const items = g?.items;
+    return Array.isArray(items) ? items : [];
+  }, [featureCatalog]);
+
+  const updateContextParam = (featureId: string, name: string, value: any) => {
+    setContextParams(prev => {
+      const next = { ...(prev || {}) };
+      const cur = { ...(next[featureId] || {}) };
+      cur[name] = value;
+      next[featureId] = cur;
+      return next;
+    });
+  };
+
+  const updateTriggerParam = (featureId: string, name: string, value: any) => {
+    setTriggerParams(prev => {
+      const next = { ...(prev || {}) };
+      const cur = { ...(next[featureId] || {}) };
+      cur[name] = value;
+      next[featureId] = cur;
+      return next;
+    });
+  };
+
+  const applyTriggerTemplate = (tpl: "raja_sr_touch" | "msb_zigzag_break" | "trend_exhaustion") => {
+    setAlertType("detector_trigger");
+    setTriggerEnabled({ [tpl]: true });
+    if (tpl === "msb_zigzag_break") {
+      setTriggerParams({ [tpl]: { limit: 400, detect_bos: true, detect_choch: true } });
+    } else if (tpl === "raja_sr_touch") {
+      setTriggerParams({ [tpl]: { limit: 400, max_zones: 5 } });
+    } else {
+      setTriggerParams({ [tpl]: { limit: 400 } });
+    }
+  };
+
+  const copyTriggerToContext = () => {
+    const enabledIds = Object.entries(triggerEnabled || {}).filter(([, v]) => !!v).map(([k]) => k);
+    const nextEnabled: Record<string, boolean> = {};
+    const nextParams: Record<string, any> = {};
+    for (const k of enabledIds) {
+      nextEnabled[k] = true;
+      nextParams[k] = triggerParams?.[k] || {};
+    }
+    setContextEnabled(nextEnabled);
+    setContextParams(nextParams);
+  };
+
+  const copyContextToTrigger = () => {
+    const enabledIds = Object.entries(contextEnabled || {}).filter(([, v]) => !!v).map(([k]) => k);
+    const nextEnabled: Record<string, boolean> = {};
+    const nextParams: Record<string, any> = {};
+    for (const k of enabledIds) {
+      nextEnabled[k] = true;
+      nextParams[k] = contextParams?.[k] || {};
+    }
+    setTriggerEnabled(nextEnabled);
+    setTriggerParams(nextParams);
+  };
+
+  const unreadReportCount = useMemo(() => {
+    if (!reports?.length) return 0;
+    const t = Number(lastSeenReportTs || 0);
+    return reports.filter(r => Number(r.ts || 0) > t).length;
+  }, [reports, lastSeenReportTs]);
+
+  const markReportsReadThrough = (ts: number) => {
+    const t = Number(ts || 0);
+    if (!Number.isFinite(t) || t <= 0) return;
+    setLastSeenReportTs(prev => {
+      const next = Math.max(Number(prev || 0), t);
+      saveNumber(AI_REPORTS_LAST_SEEN_TS_KEY, next);
+      return next;
+    });
+  };
 
   const refresh = async () => {
     setErr(null);
     try {
-      const a = await fetch("/api/alerts").then((r) => r.json());
+      const a = await fetch("/api/alerts").then(readJsonOrThrow);
       setAlerts(Array.isArray(a?.alerts) ? a.alerts : []);
-      const e = await fetch("/api/alerts/events?limit=100").then((r) => r.json());
+      const e = await fetch("/api/alerts/events?limit=100").then(readJsonOrThrow);
       setEvents(Array.isArray(e?.events) ? e.events : []);
-      const rp = await fetch("/api/alerts/reports?limit=50").then((r) => r.json());
+      const rp = await fetch("/api/alerts/reports?limit=50").then(readJsonOrThrow);
       setReports(Array.isArray(rp?.reports) ? rp.reports : []);
     } catch (e: any) {
       setErr(e?.message || "Failed to load");
@@ -83,6 +221,61 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
     return () => clearInterval(t);
   }, []);
 
+  const loadAnalyzerPrompt = async () => {
+    setErr(null);
+    try {
+      const r = await fetch("/api/alerts/analyzer-prompt").then(readJsonOrThrow);
+      setAnalyzerPrompt(String(r?.prompt || ""));
+      setAnalyzerPromptDirty(false);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load analyzer prompt");
+    }
+  };
+
+  const saveAnalyzerPrompt = async () => {
+    setErr(null);
+    try {
+      const r = await fetch("/api/alerts/analyzer-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: analyzerPrompt }),
+      }).then(readJsonOrThrow);
+      if (!r?.ok) throw new Error(r?.detail || "Failed to save");
+      setAnalyzerPromptDirty(false);
+      setShowAnalyzerPromptModal(false);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to save analyzer prompt");
+    }
+  };
+
+  const clearEventLogs = async () => {
+    setErr(null);
+    try {
+      const r = await fetch("/api/alerts/events/clear", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }).then(readJsonOrThrow);
+      if (!r?.ok) throw new Error(r?.detail || "Failed to clear");
+      setEvents([]);
+      refresh();
+    } catch (e: any) {
+      setErr(e?.message || "Failed to clear");
+    }
+  };
+
+  const clearAIReports = async () => {
+    setErr(null);
+    try {
+      const r = await fetch("/api/alerts/reports/clear", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }).then(readJsonOrThrow);
+      if (!r?.ok) throw new Error(r?.detail || "Failed to clear");
+      setReports([]);
+      setSelectedReportId(null);
+      setShowReportsModal(false);
+      setLastSeenReportTs(0);
+      saveNumber(AI_REPORTS_LAST_SEEN_TS_KEY, 0);
+      refresh();
+    } catch (e: any) {
+      setErr(e?.message || "Failed to clear");
+    }
+  };
+
   const create = async () => {
     setErr(null);
     try {
@@ -93,8 +286,8 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
         timeframe,
         telegram: enableTg && tg?.token && tg?.chat_id ? { token: tg.token, chat_id: tg.chat_id } : undefined,
         agent_configs: {
-          initial_prompt: initialPrompt || undefined
-        }
+          initial_prompt: initialPrompt || undefined,
+        },
       };
 
       // Inject Agent Configs from local storage so the backend has API keys to run the agent
@@ -108,6 +301,17 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
         }
       } catch (e) {}
 
+      try {
+        const enabledIds = Object.entries(contextEnabled || {}).filter(([, v]) => !!v).map(([k]) => k);
+        if (enabledIds.length) {
+          const params: any = {};
+          for (const k of enabledIds) {
+            params[k] = contextParams?.[k] || {};
+          }
+          rule.agent_configs.context_features = { timeframe, enabled: enabledIds, params };
+        }
+      } catch (e) {}
+
       let name = "";
       if (alertType === "raja_sr_touch") {
         rule.cooldown_minutes = cooldown;
@@ -118,13 +322,18 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
         name = `MSB Break ${symbol} ${timeframe}`;
       } else if (alertType === "trend_exhaustion") {
         name = `Trend Exhaustion ${symbol} ${timeframe}`;
+      } else if (alertType === "detector_trigger") {
+        const enabledIds = Object.entries(triggerEnabled || {}).filter(([, v]) => !!v).map(([k]) => k);
+        const dets = enabledIds.map((fid) => ({ feature_id: fid, timeframe: triggerTimeframe || timeframe, params: triggerParams?.[fid] || {} }));
+        rule.trigger_detectors = dets;
+        name = `Detector Trigger ${symbol} ${triggerTimeframe || timeframe}`;
       }
 
       const r = await fetch("/api/alerts/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, rule, enabled: true }),
-      }).then((r) => r.json());
+      }).then(readJsonOrThrow);
       
       if (!r?.ok) throw new Error(r?.detail || "Failed to create");
       await refresh();
@@ -135,127 +344,444 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   };
 
   const toggle = async (id: number, enabled: boolean) => {
-    await fetch(`/api/alerts/toggle`, {
+    try {
+      const r = await fetch(`/api/alerts/toggle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, enabled: !enabled }),
-    });
-    refresh();
+      }).then(readJsonOrThrow);
+      if (!r?.ok) throw new Error(r?.detail || "Failed to toggle");
+      refresh();
+    } catch (e: any) {
+      setErr(e?.message || "Failed to toggle");
+    }
   };
 
   const remove = async (id: number) => {
-    await fetch(`/api/alerts/delete`, { 
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id })
-    });
-    refresh();
+    try {
+      const r = await fetch(`/api/alerts/delete`, { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      }).then(readJsonOrThrow);
+      if (!r?.ok) throw new Error(r?.detail || "Failed to delete");
+      refresh();
+    } catch (e: any) {
+      setErr(e?.message || "Failed to delete");
+    }
   };
 
   return (
     <div className="h-full flex flex-col gap-3 p-3 overflow-y-auto relative">
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-gray-200">AI Agent Triggers</div>
-        <button 
-          onClick={() => setShowReportsModal(true)}
-          className="flex items-center gap-1.5 px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-xs text-white transition-colors relative"
-        >
-          <Inbox size={14} />
-          <span>AI Reports</span>
-          {reports.length > 0 && (
-            <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white">
-              {reports.length}
-            </span>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => {
+              await loadAnalyzerPrompt();
+              setShowAnalyzerPromptModal(true);
+            }}
+            className="flex items-center gap-1.5 px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-xs text-white transition-colors"
+            type="button"
+          >
+            Analyzer System Prompt
+          </button>
+          <button 
+            onClick={() => setShowReportsModal(true)}
+            className="flex items-center gap-1.5 px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-xs text-white transition-colors relative"
+            type="button"
+          >
+            <Inbox size={14} />
+            <span>AI Reports</span>
+            {unreadReportCount > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white">
+                {unreadReportCount}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
       
       {err && <div className="text-xs text-red-400 whitespace-pre-wrap bg-red-500/10 p-2 rounded">{err}</div>}
 
       {/* CREATE NEW RULE */}
-      <div className="border border-white/10 bg-white/5 rounded p-3 space-y-3">
-        <div className="text-xs font-medium text-[#00bfa5]">Create New Event Trigger</div>
-        
-        <select 
-          className="w-full h-8 bg-[#0b0f14] border border-white/10 rounded px-2 text-xs text-white" 
-          value={alertType} 
-          onChange={(e) => setAlertType(e.target.value as any)}
+      <div className="border border-white/10 bg-white/5 rounded p-3">
+        <button
+          className="w-full flex items-center justify-between text-xs font-medium text-[#00bfa5]"
+          onClick={() => {
+            const next = !createCollapsed;
+            setCreateCollapsed(next);
+            saveNumber(ALERT_CREATE_COLLAPSED_KEY, next ? 1 : 0);
+          }}
+          type="button"
         >
-          <option value="raja_sr_touch">RajaSR Zone Touch</option>
-          <option value="msb_zigzag_break">MSB / ChoCh Structure Break</option>
-          <option value="trend_exhaustion">Trend Exhaustion (Triangle)</option>
-        </select>
-
-        <div className="grid grid-cols-2 gap-2">
-          <input className="h-8 bg-black/30 border border-white/10 rounded px-2 text-xs" value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="Symbol (e.g. XAUUSD)" />
-          <select className="h-8 bg-[#0b0f14] border border-white/10 rounded px-2 text-xs text-white" value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
-            <option value="M1">M1</option>
-            <option value="M5">M5</option>
-            <option value="M15">M15</option>
-            <option value="M30">M30</option>
-            <option value="H1">H1</option>
-            <option value="H4">H4</option>
-            <option value="D1">D1</option>
-          </select>
+          <span>Create New Event Trigger</span>
+          {createCollapsed ? <ChevronRight size={14} className="text-[#00bfa5]" /> : <ChevronDown size={14} className="text-[#00bfa5]" />}
+        </button>
+        <div className="text-[10px] text-gray-500 mt-1">
+          {alertType.replace(/_/g, " ")} · {symbol} · {timeframe}
         </div>
 
-        {/* Dynamic Params based on type */}
-        {alertType === "raja_sr_touch" && (
-          <div className="flex items-center justify-between text-xs text-gray-300 bg-black/20 p-2 rounded">
-            <span>Cooldown (mins):</span>
-            <input className="w-16 h-6 bg-black/50 border border-white/10 rounded px-2 text-center" type="number" value={cooldown} onChange={(e) => setCooldown(Number(e.target.value))} />
+        {!createCollapsed && (
+          <div className="space-y-3 mt-3">
+            <select 
+              className="w-full h-8 bg-[#0b0f14] border border-white/10 rounded px-2 text-xs text-white" 
+              value={alertType} 
+              onChange={(e) => setAlertType(e.target.value as any)}
+            >
+              <option value="raja_sr_touch">RajaSR Zone Touch</option>
+              <option value="msb_zigzag_break">MSB / ChoCh Structure Break</option>
+              <option value="trend_exhaustion">Trend Exhaustion (Triangle)</option>
+              <option value="detector_trigger">Detector Trigger (Generic)</option>
+            </select>
+
+            <div className="grid grid-cols-2 gap-2">
+              <input className="h-8 bg-black/30 border border-white/10 rounded px-2 text-xs" value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="Symbol (e.g. XAUUSD)" />
+              <select className="h-8 bg-[#0b0f14] border border-white/10 rounded px-2 text-xs text-white" value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
+                <option value="M1">M1</option>
+                <option value="M5">M5</option>
+                <option value="M15">M15</option>
+                <option value="M30">M30</option>
+                <option value="H1">H1</option>
+                <option value="H4">H4</option>
+                <option value="D1">D1</option>
+              </select>
+            </div>
+
+            {/* Dynamic Params based on type */}
+            {alertType === "raja_sr_touch" && (
+              <div className="flex items-center justify-between text-xs text-gray-300 bg-black/20 p-2 rounded">
+                <span>Cooldown (mins):</span>
+                <input className="w-16 h-6 bg-black/50 border border-white/10 rounded px-2 text-center" type="number" value={cooldown} onChange={(e) => setCooldown(Number(e.target.value))} />
+              </div>
+            )}
+
+            {alertType === "msb_zigzag_break" && (
+              <div className="flex items-center gap-4 text-xs text-gray-300 bg-black/20 p-2 rounded">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={detectChoch} onChange={(e) => setDetectChoch(e.target.checked)} /> CHOCH
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={detectBos} onChange={(e) => setDetectBos(e.target.checked)} /> BoS
+                </label>
+              </div>
+            )}
+
+            {alertType === "detector_trigger" && (
+              <div className="bg-black/20 p-2 rounded border border-white/5">
+                <div className="text-[11px] text-gray-400 font-medium mb-2">Trigger Detectors</div>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <select
+                    className="h-7 bg-[#0b0f14] border border-white/10 rounded px-2 text-[11px] text-white"
+                    value={triggerTimeframe}
+                    onChange={(e) => setTriggerTimeframe(e.target.value)}
+                  >
+                    <option value="M1">M1</option>
+                    <option value="M5">M5</option>
+                    <option value="M15">M15</option>
+                    <option value="M30">M30</option>
+                    <option value="H1">H1</option>
+                    <option value="H4">H4</option>
+                    <option value="D1">D1</option>
+                  </select>
+                  <div className="text-[10px] text-gray-500 flex items-center">用于 trigger 扫描的 TF</div>
+                </div>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  <button type="button" className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300" onClick={() => applyTriggerTemplate("raja_sr_touch")}>
+                    Template: RajaSR Touch
+                  </button>
+                  <button type="button" className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300" onClick={() => applyTriggerTemplate("msb_zigzag_break")}>
+                    Template: MSB Break
+                  </button>
+                  <button type="button" className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300" onClick={() => applyTriggerTemplate("trend_exhaustion")}>
+                    Template: Trend Exhaustion
+                  </button>
+                  <button type="button" className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300" onClick={copyTriggerToContext}>
+                    Copy Trigger → Context
+                  </button>
+                  <button type="button" className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300" onClick={copyContextToTrigger}>
+                    Copy Context → Trigger
+                  </button>
+                </div>
+                {!patternCatalogItems.length ? (
+                  <div className="text-[10px] text-gray-500">Feature catalog not loaded.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {patternCatalogItems.map((it: any) => {
+                      const fid = String(it?.id || "");
+                      if (!fid) return null;
+                      const enabled = !!triggerEnabled[fid];
+                      const params = Array.isArray(it?.params) ? it.params : [];
+                      return (
+                        <div key={fid} className="border border-white/10 rounded p-2 bg-black/10">
+                          <label className="flex items-center gap-2 text-[11px] text-gray-200 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={enabled}
+                              onChange={(e) => {
+                                const v = e.target.checked;
+                                setTriggerEnabled(prev => ({ ...(prev || {}), [fid]: v }));
+                                if (v && params.length) {
+                                  setTriggerParams(prev => {
+                                    const next = { ...(prev || {}) };
+                                    const cur = { ...(next[fid] || {}) };
+                                    for (const p of params) {
+                                      const n = String(p?.name || "");
+                                      if (!n) continue;
+                                      if (cur[n] === undefined) cur[n] = p?.default;
+                                    }
+                                    next[fid] = cur;
+                                    return next;
+                                  });
+                                }
+                              }}
+                            />
+                            <span>{String(it?.label || fid)}</span>
+                          </label>
+                          {enabled && params.length > 0 && (
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              {params.map((p: any) => {
+                                const pn = String(p?.name || "");
+                                if (!pn) return null;
+                                const pt = String(p?.type || "string");
+                                const val = triggerParams?.[fid]?.[pn];
+                                const enumVals = Array.isArray(p?.enum) ? p.enum : null;
+                                if (pt === "boolean") {
+                                  return (
+                                    <label key={pn} className="flex items-center gap-2 text-[10px] text-gray-300">
+                                      <input type="checkbox" checked={!!val} onChange={(e) => updateTriggerParam(fid, pn, e.target.checked)} />
+                                      <span>{pn}</span>
+                                    </label>
+                                  );
+                                }
+                                if (pt === "string" && enumVals) {
+                                  return (
+                                    <div key={pn} className="flex flex-col gap-1">
+                                      <span className="text-[10px] text-gray-500">{pn}</span>
+                                      <select
+                                        className="h-7 bg-[#0b0f14] border border-white/10 rounded px-2 text-[11px] text-white"
+                                        value={String(val ?? p?.default ?? "")}
+                                        onChange={(e) => updateTriggerParam(fid, pn, e.target.value)}
+                                      >
+                                        {enumVals.map((x: any) => (
+                                          <option key={String(x)} value={String(x)}>
+                                            {String(x)}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  );
+                                }
+                                if (pt === "array") {
+                                  return (
+                                    <div key={pn} className="flex flex-col gap-1">
+                                      <span className="text-[10px] text-gray-500">{pn}</span>
+                                      <input
+                                        className="h-7 bg-black/30 border border-white/10 rounded px-2 text-[11px] text-white"
+                                        value={Array.isArray(val) ? val.join(",") : String(val ?? "")}
+                                        onChange={(e) => {
+                                          const raw = e.target.value;
+                                          const parts = raw
+                                            .split(",")
+                                            .map(s => s.trim())
+                                            .filter(Boolean)
+                                            .map(s => {
+                                              const n = Number(s);
+                                              return Number.isFinite(n) ? n : s;
+                                            });
+                                          updateTriggerParam(fid, pn, parts);
+                                        }}
+                                      />
+                                    </div>
+                                  );
+                                }
+                                const isInt = pt === "integer";
+                                const num = Number(val ?? p?.default ?? 0);
+                                return (
+                                  <div key={pn} className="flex flex-col gap-1">
+                                    <span className="text-[10px] text-gray-500">{pn}</span>
+                                    <input
+                                      className="h-7 bg-black/30 border border-white/10 rounded px-2 text-[11px] text-white"
+                                      type="number"
+                                      step={isInt ? 1 : "any"}
+                                      value={Number.isFinite(num) ? num : 0}
+                                      onChange={(e) => updateTriggerParam(fid, pn, isInt ? parseInt(e.target.value || "0", 10) : Number(e.target.value))}
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-gray-500">Agent Prompt (Optional)</span>
+              <textarea 
+                className="w-full h-16 bg-black/30 border border-white/10 rounded p-2 text-xs resize-none" 
+                placeholder="e.g. Please analyze if this is a valid setup and draw a box..."
+                value={initialPrompt}
+                onChange={(e) => setInitialPrompt(e.target.value)}
+              />
+            </div>
+
+            <div className="bg-black/20 p-2 rounded border border-white/5">
+              <div className="text-[11px] text-gray-400 font-medium mb-2">Context Features (AI 投喂选型)</div>
+              {!patternCatalogItems.length ? (
+                <div className="text-[10px] text-gray-500">Feature catalog not loaded.</div>
+              ) : (
+                <div className="space-y-2">
+                  {patternCatalogItems.map((it: any) => {
+                    const fid = String(it?.id || "");
+                    if (!fid) return null;
+                    const enabled = !!contextEnabled[fid];
+                    const params = Array.isArray(it?.params) ? it.params : [];
+                    return (
+                      <div key={fid} className="border border-white/10 rounded p-2 bg-black/10">
+                        <label className="flex items-center gap-2 text-[11px] text-gray-200 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={enabled}
+                            onChange={(e) => {
+                              const v = e.target.checked;
+                              setContextEnabled(prev => ({ ...(prev || {}), [fid]: v }));
+                              if (v && params.length) {
+                                setContextParams(prev => {
+                                  const next = { ...(prev || {}) };
+                                  const cur = { ...(next[fid] || {}) };
+                                  for (const p of params) {
+                                    const n = String(p?.name || "");
+                                    if (!n) continue;
+                                    if (cur[n] === undefined) cur[n] = p?.default;
+                                  }
+                                  next[fid] = cur;
+                                  return next;
+                                });
+                              }
+                            }}
+                          />
+                          <span>{String(it?.label || fid)}</span>
+                        </label>
+                        {enabled && params.length > 0 && (
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            {params.map((p: any) => {
+                              const pn = String(p?.name || "");
+                              if (!pn) return null;
+                              const pt = String(p?.type || "string");
+                              const val = contextParams?.[fid]?.[pn];
+                              const enumVals = Array.isArray(p?.enum) ? p.enum : null;
+                              if (pt === "boolean") {
+                                return (
+                                  <label key={pn} className="flex items-center gap-2 text-[10px] text-gray-300">
+                                    <input type="checkbox" checked={!!val} onChange={(e) => updateContextParam(fid, pn, e.target.checked)} />
+                                    <span>{pn}</span>
+                                  </label>
+                                );
+                              }
+                              if (pt === "string" && enumVals) {
+                                return (
+                                  <div key={pn} className="flex flex-col gap-1">
+                                    <span className="text-[10px] text-gray-500">{pn}</span>
+                                    <select
+                                      className="h-7 bg-[#0b0f14] border border-white/10 rounded px-2 text-[11px] text-white"
+                                      value={String(val ?? p?.default ?? "")}
+                                      onChange={(e) => updateContextParam(fid, pn, e.target.value)}
+                                    >
+                                      {enumVals.map((x: any) => (
+                                        <option key={String(x)} value={String(x)}>
+                                          {String(x)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                );
+                              }
+                              if (pt === "array") {
+                                return (
+                                  <div key={pn} className="flex flex-col gap-1">
+                                    <span className="text-[10px] text-gray-500">{pn}</span>
+                                    <input
+                                      className="h-7 bg-black/30 border border-white/10 rounded px-2 text-[11px] text-white"
+                                      value={Array.isArray(val) ? val.join(",") : String(val ?? "")}
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        const parts = raw
+                                          .split(",")
+                                          .map(s => s.trim())
+                                          .filter(Boolean)
+                                          .map(s => {
+                                            const n = Number(s);
+                                            return Number.isFinite(n) ? n : s;
+                                          });
+                                        updateContextParam(fid, pn, parts);
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              }
+                              const isInt = pt === "integer";
+                              const num = Number(val ?? p?.default ?? 0);
+                              return (
+                                <div key={pn} className="flex flex-col gap-1">
+                                  <span className="text-[10px] text-gray-500">{pn}</span>
+                                  <input
+                                    className="h-7 bg-black/30 border border-white/10 rounded px-2 text-[11px] text-white"
+                                    type="number"
+                                    step={isInt ? 1 : "any"}
+                                    value={Number.isFinite(num) ? num : 0}
+                                    onChange={(e) => updateContextParam(fid, pn, isInt ? parseInt(e.target.value || "0", 10) : Number(e.target.value))}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="text-[10px] text-gray-500 mt-2">
+                创建规则时会写入 rule.agent_configs.context_features，由后端决定构建 event_context 时计算哪些特征。
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-1 border-t border-white/10">
+              <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
+                <input type="checkbox" checked={enableTg} onChange={(e) => setEnableTg(e.target.checked)} />
+                Enable Telegram Notification
+              </label>
+              <button 
+                className="text-gray-500 hover:text-white transition-colors p-1 rounded hover:bg-white/10"
+                onClick={() => setShowTgSettings(!showTgSettings)}
+                title="Telegram Settings"
+                type="button"
+              >
+                <Settings size={14} />
+              </button>
+            </div>
+
+            {showTgSettings && (
+              <div className="grid grid-cols-2 gap-2 bg-black/20 p-2 rounded border border-white/5">
+                <input className="h-8 bg-[#0b0f14] border border-white/10 rounded px-2 text-xs" value={tg.token} onChange={(e) => setTg({ ...tg, token: e.target.value })} placeholder="Bot Token" />
+                <input className="h-8 bg-[#0b0f14] border border-white/10 rounded px-2 text-xs" value={tg.chat_id} onChange={(e) => setTg({ ...tg, chat_id: e.target.value })} placeholder="Chat ID" />
+              </div>
+            )}
+
+            <Button className="w-full h-8 text-xs bg-[#00bfa5] hover:bg-[#00bfa5]/80 text-black font-medium" onClick={create}>
+              Create Rule
+            </Button>
           </div>
         )}
-
-        {alertType === "msb_zigzag_break" && (
-          <div className="flex items-center gap-4 text-xs text-gray-300 bg-black/20 p-2 rounded">
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input type="checkbox" checked={detectChoch} onChange={(e) => setDetectChoch(e.target.checked)} /> CHOCH
-            </label>
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input type="checkbox" checked={detectBos} onChange={(e) => setDetectBos(e.target.checked)} /> BoS
-            </label>
-          </div>
-        )}
-
-        <div className="flex flex-col gap-1">
-          <span className="text-[11px] text-gray-500">Agent Prompt (Optional)</span>
-          <textarea 
-            className="w-full h-16 bg-black/30 border border-white/10 rounded p-2 text-xs resize-none" 
-            placeholder="e.g. Please analyze if this is a valid setup and draw a box..."
-            value={initialPrompt}
-            onChange={(e) => setInitialPrompt(e.target.value)}
-          />
-        </div>
-
-        <div className="flex items-center justify-between pt-1 border-t border-white/10">
-          <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
-            <input type="checkbox" checked={enableTg} onChange={(e) => setEnableTg(e.target.checked)} />
-            Enable Telegram Notification
-          </label>
-          <button 
-            className="text-gray-500 hover:text-white transition-colors p-1 rounded hover:bg-white/10"
-            onClick={() => setShowTgSettings(!showTgSettings)}
-            title="Telegram Settings"
-          >
-            <Settings size={14} />
-          </button>
-        </div>
-
-        {showTgSettings && (
-          <div className="grid grid-cols-2 gap-2 bg-black/20 p-2 rounded border border-white/5">
-            <input className="h-8 bg-[#0b0f14] border border-white/10 rounded px-2 text-xs" value={tg.token} onChange={(e) => setTg({ ...tg, token: e.target.value })} placeholder="Bot Token" />
-            <input className="h-8 bg-[#0b0f14] border border-white/10 rounded px-2 text-xs" value={tg.chat_id} onChange={(e) => setTg({ ...tg, chat_id: e.target.value })} placeholder="Chat ID" />
-          </div>
-        )}
-
-        <Button className="w-full h-8 text-xs bg-[#00bfa5] hover:bg-[#00bfa5]/80 text-black font-medium" onClick={create}>
-          Create Rule
-        </Button>
       </div>
 
       {/* ACTIVE RULES LIST */}
-      <div className="flex-1 min-h-[150px] overflow-y-auto space-y-2">
+      <div className="flex-1 min-h-[150px] overflow-y-auto space-y-2 custom-scrollbar pr-1">
         <div className="text-xs font-medium text-gray-400">Active Rules</div>
         {alerts.length === 0 && <div className="text-xs text-gray-500 text-center py-4">No rules created yet</div>}
         {alerts.map((a) => {
@@ -286,8 +812,18 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
 
       {/* TRIGGER LOGS */}
       <div className="border border-white/10 rounded p-3 h-[180px] shrink-0 flex flex-col">
-        <div className="text-xs font-medium text-gray-400 mb-2">Event Logs</div>
-        <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs font-medium text-gray-400">Event Logs</div>
+          <button
+            onClick={clearEventLogs}
+            className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300 flex items-center gap-1"
+            type="button"
+          >
+            <Trash2 size={12} />
+            Clear
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
           {events.map((e) => (
             <div key={e.id} className="text-[10px] border-l-2 border-[#00bfa5] bg-white/5 rounded-r p-1.5 flex flex-col gap-1">
               <div className="text-gray-500">{new Date(e.ts * 1000).toLocaleString()}</div>
@@ -306,31 +842,50 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
               <Inbox size={16} />
               AI Reports Inbox
             </div>
-            <button onClick={() => { setShowReportsModal(false); setSelectedReportId(null); }} className="text-gray-400 hover:text-white transition-colors">
-              <X size={16} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={clearAIReports}
+                className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300 flex items-center gap-1"
+                type="button"
+              >
+                <Trash2 size={12} />
+                Clear
+              </button>
+              <button onClick={() => { setShowReportsModal(false); setSelectedReportId(null); }} className="text-gray-400 hover:text-white transition-colors" type="button">
+                <X size={16} />
+              </button>
+            </div>
           </div>
           
           {selectedReportId === null ? (
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
               {reports.length === 0 && (
                 <div className="text-xs text-gray-500 text-center py-10">No AI reports generated yet.</div>
               )}
-              {reports.map((r) => (
-                <div 
-                  key={r.id} 
-                  onClick={() => setSelectedReportId(r.id)}
-                  className="bg-white/5 hover:bg-white/10 border border-white/10 rounded p-3 cursor-pointer transition-colors flex flex-col gap-2"
-                >
-                  <div className="flex items-center justify-between text-[10px] text-gray-400">
-                    <span>{new Date(r.ts * 1000).toLocaleString()}</span>
-                    <span className="bg-[#00bfa5]/20 text-[#00bfa5] px-1.5 py-0.5 rounded">{r.alert_name}</span>
+              {reports.map((r) => {
+                const isUnread = Number(r.ts || 0) > Number(lastSeenReportTs || 0);
+                return (
+                  <div 
+                    key={r.id} 
+                    onClick={() => {
+                      markReportsReadThrough(Number(r.ts || 0));
+                      setSelectedReportId(r.id);
+                    }}
+                    className={`bg-white/5 hover:bg-white/10 border border-white/10 rounded p-3 cursor-pointer transition-colors flex flex-col gap-2 ${isUnread ? "ring-1 ring-red-500/30" : ""}`}
+                  >
+                    <div className="flex items-center justify-between text-[10px] text-gray-400">
+                      <div className="flex items-center gap-2">
+                        {isUnread && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                        <span>{new Date(r.ts * 1000).toLocaleString()}</span>
+                      </div>
+                      <span className="bg-[#00bfa5]/20 text-[#00bfa5] px-1.5 py-0.5 rounded">{r.alert_name}</span>
+                    </div>
+                    <div className="text-xs text-gray-200 font-medium line-clamp-2 break-words">
+                      {r.report_content.replace(/[#*`]/g, '').slice(0, 100)}...
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-200 font-medium line-clamp-2 break-words">
-                    {r.report_content.replace(/[#*`]/g, '').slice(0, 100)}...
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden">
@@ -339,7 +894,7 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
                   &larr; Back to Inbox
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-4">
+              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
                 {reports.filter(r => r.id === selectedReportId).map(r => (
                   <div key={r.id} className="text-xs text-gray-200 whitespace-pre-wrap font-mono leading-relaxed">
                     {r.report_content}
@@ -348,6 +903,53 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {showAnalyzerPromptModal && (
+        <div className="absolute inset-0 bg-[#0b0f14] z-50 flex flex-col">
+          <div className="flex items-center justify-between p-3 border-b border-white/10 shrink-0">
+            <div className="text-sm font-semibold text-white">Analyzer System Prompt</div>
+            <button
+              onClick={() => setShowAnalyzerPromptModal(false)}
+              className="text-gray-400 hover:text-white transition-colors"
+              type="button"
+              title="Close"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-hidden p-3 flex flex-col gap-2">
+            <div className="text-[11px] text-gray-500">
+              保存后会写入 alerts.sqlite，并在下一次 event_dual analyzer 执行时生效。
+            </div>
+            <textarea
+              className="flex-1 w-full text-xs rounded border border-white/10 bg-black/20 p-2 outline-none focus:border-emerald-400 custom-scrollbar resize-none font-mono"
+              value={analyzerPrompt}
+              onChange={(e) => {
+                setAnalyzerPrompt(e.target.value);
+                setAnalyzerPromptDirty(true);
+              }}
+            />
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                className="h-8 px-3 text-xs"
+                variant="secondary"
+                onClick={() => setShowAnalyzerPromptModal(false)}
+                type="button"
+              >
+                Cancel
+              </Button>
+              <Button
+                className="h-8 px-3 text-xs bg-[#00bfa5] hover:bg-[#00bfa5]/80 text-black font-medium disabled:opacity-50"
+                onClick={saveAnalyzerPrompt}
+                disabled={!analyzerPromptDirty}
+                type="button"
+              >
+                Save
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

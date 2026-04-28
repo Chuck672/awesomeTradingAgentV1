@@ -20,7 +20,7 @@ class FeatureService:
         Compute a specific feature over the entire dataset and save it to Parquet.
         Returns the path to the cached feature file.
         """
-        from backend.api.dependencies import get_current_broker_deps
+        from backend.core.broker_context import get_current_broker_deps
         deps = get_current_broker_deps()
         if not deps: return ""
         sqlite_manager = deps['sqlite_manager']
@@ -52,7 +52,7 @@ class FeatureService:
         """
         Retrieve computed features from cache, joined by time.
         """
-        from backend.brokers.broker_facade import get_current_broker_deps
+        from backend.core.broker_context import get_current_broker_deps
         deps = get_current_broker_deps()
         if not deps: return []
         sqlite_manager = deps['sqlite_manager']

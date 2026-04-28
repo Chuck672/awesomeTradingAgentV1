@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from typing import Callable, Awaitable, Dict, List, Optional, Any
 import zmq
 import zmq.asyncio
@@ -40,7 +41,7 @@ class MessageBus:
     Allows decoupling of data ingestion, storage, and WebSocket distribution.
     """
     def __init__(self, pub_url: str = "tcp://127.0.0.1:5557"):
-        self.pub_url = pub_url
+        self.pub_url = os.environ.get("AWESOMECHART_MESSAGE_BUS_URL", "").strip() or pub_url
         self.context = zmq.asyncio.Context()
         self._pub_socket: Optional[zmq.asyncio.Socket] = None
         self._sub_sockets: List[zmq.asyncio.Socket] = []
@@ -50,7 +51,39 @@ class MessageBus:
         """Initialize the publisher socket."""
         if not self._pub_socket:
             self._pub_socket = self.context.socket(zmq.PUB)
-            self._pub_socket.bind(self.pub_url)
+            last_err: Exception | None = None
+            bound = False
+            base = self.pub_url
+            host = None
+            port = None
+            if base.startswith("tcp://") and base.count(":") >= 2:
+                try:
+                    host = base.rsplit(":", 1)[0]
+                    port = int(base.rsplit(":", 1)[1])
+                except Exception:
+                    host = None
+                    port = None
+
+            if host is not None and port is not None:
+                for p in range(port, port + 50):
+                    try:
+                        url = f"{host}:{p}"
+                        self._pub_socket.bind(url)
+                        self.pub_url = url
+                        bound = True
+                        break
+                    except Exception as e:
+                        last_err = e
+                        continue
+            else:
+                try:
+                    self._pub_socket.bind(self.pub_url)
+                    bound = True
+                except Exception as e:
+                    last_err = e
+
+            if not bound:
+                raise last_err or RuntimeError("message_bus_bind_failed")
             logger.info(f"MessageBus Publisher started on {self.pub_url}")
             self._running = True
 
@@ -70,7 +103,7 @@ class MessageBus:
         Topic format usually: "MARKET_DATA.{symbol}.{timeframe}" or "SYNC_PROGRESS.{symbol}"
         """
         if not self._pub_socket:
-            logger.warning("Publisher socket not initialized. Call start() first.")
+            logger.warning("publish_dropped publisher_not_initialized topic=%s", topic)
             return
             
         try:
@@ -81,7 +114,7 @@ class MessageBus:
                 msg_data = json.dumps(message)
             await self._pub_socket.send_multipart([topic.encode('utf-8'), msg_data.encode('utf-8')])
         except Exception as e:
-            logger.error(f"Error publishing message: {e}")
+            logger.exception("publish_failed topic=%s err=%s", topic, str(e))
 
     async def subscribe(self, topic: str, callback: Callable[[str, Any], Awaitable[None]]):
         """
@@ -118,7 +151,7 @@ class MessageBus:
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.error(f"Error in subscriber loop for topic {topic}: {e}")
+                    logger.exception("subscriber_loop_failed topic=%s err=%s", topic, str(e))
                     await asyncio.sleep(1) # Prevent tight loop on error
                     
         return asyncio.create_task(_listen())

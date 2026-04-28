@@ -1,0 +1,167 @@
+{
+  "event": {
+    "event_id": "debug_dump",
+    "trigger_type": "manual",
+    "trigger_text": "debug_dump_all_features",
+    "symbol": "XAUUSD",
+    "timeframe": "M15",
+    "snapshot_time_iso": null,
+    "trend_tf": "H1",
+    "exec_tf": "M15",
+    "liquiditylevel_tf": "H4"
+  },
+  "multi_tf_alignment": {
+    "direction": "neutral",
+    "consistency": "unknown",
+    "note": "H1=n/a, M15=n/a"
+  },
+  "market_state": {
+    "session": null,
+    "market_session": null,
+    "current_quote": {
+      "ok": false,
+      "error": "symbol_info_tick returned None",
+      "time_iso": null
+    },
+    "spread_pts": null,
+    "data_fresh": false,
+    "vol_regime": "unknown",
+    "volume_activity": "unknown",
+    "upcoming_news_impact": "unknown",
+    "session_vp": {}
+  },
+  "indicator_notes": {
+    "SMA_20": "简单移动平均线(20)，单位为价格点。",
+    "SMA_50": "简单移动平均线(50)，单位为价格点。",
+    "EMA_20": "指数移动平均线(20)，单位为价格点。",
+    "ATR_14": "真实波幅均值(14)，单位为价格点（常用于止损距离参考）。",
+    "RSI_14": "相对强弱指数(14)，范围 0-100。",
+    "MACD": "MACD(12,26,9)：macd/signal/hist 单位为价格点。",
+    "VolumeProfile_POC": "Volume Profile 的 POC 价格（成交量最大价位），单位为价格点。",
+    "VolumeProfile_VAL": "Value Area Low（70%价值区下沿），单位为价格点。",
+    "VolumeProfile_VAH": "Value Area High（70%价值区上沿），单位为价格点。",
+    "Trend_Exhaustion": "趋势衰竭状态（超买/超卖与反转标记）。",
+    "Market_Structure": "结构状态：HH_HL / LH_LL / Consolidation。",
+    "Structure_High": "确认结构高点（用于结构突破/失效判断）。",
+    "Structure_Low": "确认结构低点（用于结构突破/失效判断）。",
+    "active_zones": "基于 RajaSR 的上下临近支撑/阻力区间（上3+下3），含距离字段。",
+    "recent_structure_breaks": "最近结构事件（BoS/ChoCh）子集（最近5条），含距离字段。",
+    "volume_activity": "成交量活动：spike/dull/normal（基于近期 M15 tick_volume 相对强弱）。",
+    "vol_regime": "波动环境：expanding/contracting/normal（基于近期区间振幅相对变化）。",
+    "session_vp": "Session Volume Profile：当前与前一 session 的 POC/VAH/VAL 摘要。"
+  },
+  "market": {
+    "ohlcv": {
+      "H4": [],
+      "H1": [],
+      "M15": []
+    },
+    "indicators": {
+      "H1": {
+        "error": "no_data"
+      },
+      "M15": {
+        "error": "no_data"
+      }
+    },
+    "patterns": {},
+    "pattern_events": {},
+    "structures": {}
+  },
+  "missing_indicators": [
+    "ohlcv:H4",
+    "ohlcv:H1",
+    "ohlcv:M15"
+  ],
+  "constraints": {
+    "output_format": "strict_json",
+    "required_fields": [
+      "signal",
+      "confidence",
+      "reasoning",
+      "evidence_refs",
+      "position_state",
+      "decision_delta",
+      "entry_type",
+      "entry_price",
+      "stop_loss",
+      "take_profit",
+      "risk_reward_ratio",
+      "invalidation_condition",
+      "trade_horizon"
+    ],
+    "output_schema": {
+      "signal": {
+        "type": "string",
+        "enum": [
+          "buy",
+          "sell",
+          "hold"
+        ]
+      },
+      "confidence": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10,
+        "description": "信号置信度，1-10"
+      },
+      "reasoning": {
+        "type": "string",
+        "description": "3-5句核心逻辑，引用上下文证据，避免模糊词"
+      },
+      "evidence_refs": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "证据引用列表：填写 evidence_id（如 zone_M15_xxx / break_M15_xxx）"
+      },
+      "position_state": {
+        "type": "string",
+        "enum": [
+          "flat",
+          "long",
+          "short"
+        ],
+        "description": "当前仓位状态（逻辑持仓，不代表真实账户）"
+      },
+      "decision_delta": {
+        "type": "string",
+        "description": "相对上一触发的变化点；若反转必须说明触发了哪条失效条件"
+      },
+      "entry_type": {
+        "type": "string",
+        "enum": [
+          "market",
+          "limit"
+        ]
+      },
+      "entry_price": {
+        "type": "number"
+      },
+      "stop_loss": {
+        "type": "number"
+      },
+      "take_profit": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      },
+      "risk_reward_ratio": {
+        "type": "number"
+      },
+      "invalidation_condition": {
+        "type": "string"
+      },
+      "trade_horizon": {
+        "type": "string",
+        "enum": [
+          "scalp",
+          "intraday",
+          "swing"
+        ]
+      }
+    }
+  }
+}

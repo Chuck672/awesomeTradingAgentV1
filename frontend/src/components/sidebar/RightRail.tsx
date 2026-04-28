@@ -1,15 +1,9 @@
 "use client";
 
 import React from "react";
-import { CalendarDays, MessageSquare, BrainCircuit, Siren, Radar, Activity, BellRing } from "lucide-react";
+import { CalendarDays, BrainCircuit, Siren, Radar, Activity } from "lucide-react";
 
-export type RightPanelId = "none" | "agent" | "chat" | "alerts" | "scan" | "patterns" | "calendar";
-
-const topIcons = [
-  { id: "agent", icon: BrainCircuit, tooltip: "Multi-Agent Trading System" },
-  { id: "chat", icon: MessageSquare, tooltip: "Chat / Strategy" },
-  { id: "alerts", icon: Siren, tooltip: "Alerts" },
-];
+export type RightPanelId = "none" | "agent" | "alerts" | "scan" | "patterns" | "calendar";
 
 function RailButton(props: { active: boolean; title: string; onClick: () => void; children: React.ReactNode }) {
   const { active, title, onClick, children } = props;
@@ -40,9 +34,6 @@ export function RightRail(props: { active: RightPanelId; onToggle: (id: RightPan
         <RailButton active={active === "agent"} title="Agent System" onClick={() => onToggle(active === "agent" ? "none" : "agent")}>
           <BrainCircuit size={20} />
         </RailButton>
-        <RailButton active={active === "chat"} title="Chat / Strategy" onClick={() => onToggle(active === "chat" ? "none" : "chat")}>
-          <MessageSquare size={20} />
-        </RailButton>
         <RailButton active={active === "alerts"} title="Alerts" onClick={() => onToggle(active === "alerts" ? "none" : "alerts")}>
           <Siren size={20} />
         </RailButton>
@@ -51,6 +42,9 @@ export function RightRail(props: { active: RightPanelId; onToggle: (id: RightPan
         </RailButton>
         <RailButton active={active === "patterns"} title="Pattern Inspector" onClick={() => onToggle(active === "patterns" ? "none" : "patterns")}>
           <Activity size={20} />
+        </RailButton>
+        <RailButton active={active === "calendar"} title="Economic Calendar" onClick={() => onToggle(active === "calendar" ? "none" : "calendar")}>
+          <CalendarDays size={20} />
         </RailButton>
       </div>
 

@@ -1,0 +1,1545 @@
+{
+  "event": {
+    "event_id": "dump_check_compact2",
+    "trigger_type": "manual_dump",
+    "trigger_text": "Manual dump for XAUUSDz M15 at 1777339162",
+    "symbol": "XAUUSDz",
+    "timeframe": "M15",
+    "snapshot_time_iso": "2026-04-27T16:00:00Z",
+    "trend_tf": "H1",
+    "exec_tf": "M15",
+    "liquiditylevel_tf": "H4"
+  },
+  "multi_tf_alignment": {
+    "direction": "bearish",
+    "consistency": "moderate",
+    "note": "H1=LH_LL, M15=Consolidation"
+  },
+  "market_state": {
+    "session": "US",
+    "market_session": "NY_PM",
+    "current_quote": {
+      "ok": false,
+      "error": "symbol_info_tick returned None",
+      "time_iso": null
+    },
+    "spread_pts": null,
+    "data_fresh": false,
+    "vol_regime": "expanding",
+    "volume_activity": "spike",
+    "upcoming_news_impact": "unknown",
+    "session_vp": {
+      "current": {
+        "id": "2026-4-27-US",
+        "type": "US",
+        "firstBarTimeIso": "2026-04-27T12:00:00Z",
+        "lastBarTimeIso": "2026-04-27T16:30:00Z",
+        "pocPrice": 4696.027,
+        "valueAreaLow": 4680.08,
+        "valueAreaHigh": 4712.626
+      },
+      "previous": {
+        "id": "2026-4-27-EUROPE",
+        "type": "EUROPE",
+        "firstBarTimeIso": "2026-04-27T07:00:00Z",
+        "lastBarTimeIso": "2026-04-27T11:45:00Z",
+        "pocPrice": 4704.64,
+        "valueAreaLow": 4700.199,
+        "valueAreaHigh": 4712.312
+      }
+    }
+  },
+  "indicator_notes": {
+    "SMA_20": "简单移动平均线(20)，单位为价格点。",
+    "SMA_50": "简单移动平均线(50)，单位为价格点。",
+    "EMA_20": "指数移动平均线(20)，单位为价格点。",
+    "ATR_14": "真实波幅均值(14)，单位为价格点（常用于止损距离参考）。",
+    "RSI_14": "相对强弱指数(14)，范围 0-100。",
+    "MACD": "MACD(12,26,9)：macd/signal/hist 单位为价格点。",
+    "VolumeProfile_POC": "Volume Profile 的 POC 价格（成交量最大价位），单位为价格点。",
+    "VolumeProfile_VAL": "Value Area Low（70%价值区下沿），单位为价格点。",
+    "VolumeProfile_VAH": "Value Area High（70%价值区上沿），单位为价格点。",
+    "Trend_Exhaustion": "趋势衰竭状态（超买/超卖与反转标记）。",
+    "Market_Structure": "结构状态：HH_HL / LH_LL / Consolidation。",
+    "Structure_High": "确认结构高点（用于结构突破/失效判断）。",
+    "Structure_Low": "确认结构低点（用于结构突破/失效判断）。",
+    "active_zones": "基于 RajaSR 的上下临近支撑/阻力区间（上3+下3），含距离字段。",
+    "recent_structure_breaks": "最近结构事件（BoS/ChoCh）子集（最近5条），含距离字段。",
+    "patterns.candlestick": "蜡烛形态事件列表（doji/inside_bar/engulfing/pinbar 等），用于补强入场/失效判断（可选字段）。",
+    "patterns.rectangle_ranges": "箱体/区间识别结果列表（range top/bottom + touches/效率等），用于判断震荡与突破/回踩（可选字段）。",
+    "patterns.rectangle_candidates_total": "本次 rectangle_range 扫描到的候选区间总数（调参/诊断用）。",
+    "structures.levels": "结构关键价位列表（由 prev_day/fractal 等来源生成），用于 BOS/假突破/回踩等检测（可选字段）。",
+    "structures.zones": "结构关键区域列表（围绕 levels 生成的 zone：top/bottom/half_width），用于 close_outside/breakout_retest 等检测（可选字段）。",
+    "pattern_events": "结构/突破类事件列表（如 bos_choch/liquidity_sweep/false_breakout/close_outside/breakout_retest_hold 等），优先引用 evidence.bar_time 与关键价位字段（可选字段）。",
+    "bos_choch": "BOS/CHOCH 事件（突破/换向），用于趋势确认与失效判断（可选字段）。",
+    "liquidity_sweep": "扫流动性事件：刺破关键位后快速回收（recover_within_bars），常用于反转/失败突破（可选字段）。",
+    "false_breakout": "假突破事件：突破区间/关键位但收盘回到区间内，优先关注 close 相对 zone 的位置（可选字段）。",
+    "close_outside_level_zone": "收盘实体确认出界：M15 实体收盘在 level zone 外侧，用于有效突破/跌破判定（可选字段）。",
+    "breakout_retest_hold": "突破→回踩→延续（hold）结构链路事件，用于顺势入场与回踩有效性（可选字段）。",
+    "volume_activity": "成交量活动：spike/dull/normal（基于近期 M15 tick_volume 相对强弱）。",
+    "vol_regime": "波动环境：expanding/contracting/normal（基于近期区间振幅相对变化）。",
+    "session_vp": "Session Volume Profile：当前与前一 session 的 POC/VAH/VAL 摘要。"
+  },
+  "market": {
+    "ohlcv": {
+      "H4": [
+        {
+          "time_iso": "2026-04-23T12:00:00Z",
+          "bars_ago": 14,
+          "open": 4720.598,
+          "high": 4743.347,
+          "low": 4716.431,
+          "close": 4720.626,
+          "tick_volume": 74871
+        },
+        {
+          "time_iso": "2026-04-23T16:00:00Z",
+          "bars_ago": 13,
+          "open": 4720.683,
+          "high": 4737.072,
+          "low": 4664.142,
+          "close": 4696.26,
+          "tick_volume": 102949
+        },
+        {
+          "time_iso": "2026-04-23T20:00:00Z",
+          "bars_ago": 12,
+          "open": 4696.114,
+          "high": 4700.661,
+          "low": 4686.495,
+          "close": 4695.342,
+          "tick_volume": 17281
+        },
+        {
+          "time_iso": "2026-04-24T00:00:00Z",
+          "bars_ago": 11,
+          "open": 4695.374,
+          "high": 4711.215,
+          "low": 4668.641,
+          "close": 4672.335,
+          "tick_volume": 52057
+        },
+        {
+          "time_iso": "2026-04-24T04:00:00Z",
+          "bars_ago": 10,
+          "open": 4672.264,
+          "high": 4695.364,
+          "low": 4657.692,
+          "close": 4694.382,
+          "tick_volume": 36171
+        },
+        {
+          "time_iso": "2026-04-24T08:00:00Z",
+          "bars_ago": 9,
+          "open": 4694.455,
+          "high": 4717.523,
+          "low": 4674.822,
+          "close": 4706.79,
+          "tick_volume": 48656
+        },
+        {
+          "time_iso": "2026-04-24T12:00:00Z",
+          "bars_ago": 8,
+          "open": 4706.868,
+          "high": 4740.389,
+          "low": 4689.585,
+          "close": 4727.112,
+          "tick_volume": 78760
+        },
+        {
+          "time_iso": "2026-04-24T16:00:00Z",
+          "bars_ago": 7,
+          "open": 4727.029,
+          "high": 4730.258,
+          "low": 4713.609,
+          "close": 4716.781,
+          "tick_volume": 36624
+        },
+        {
+          "time_iso": "2026-04-24T20:00:00Z",
+          "bars_ago": 6,
+          "open": 4716.719,
+          "high": 4717.579,
+          "low": 4705.345,
+          "close": 4708.598,
+          "tick_volume": 5584
+        },
+        {
+          "time_iso": "2026-04-26T20:00:00Z",
+          "bars_ago": 5,
+          "open": 4696.256,
+          "high": 4700.016,
+          "low": 4674.961,
+          "close": 4680.187,
+          "tick_volume": 12035
+        },
+        {
+          "time_iso": "2026-04-27T00:00:00Z",
+          "bars_ago": 4,
+          "open": 4680.25,
+          "high": 4729.564,
+          "low": 4672.138,
+          "close": 4724.18,
+          "tick_volume": 45817
+        },
+        {
+          "time_iso": "2026-04-27T04:00:00Z",
+          "bars_ago": 3,
+          "open": 4724.027,
+          "high": 4730.256,
+          "low": 4708.758,
+          "close": 4713.538,
+          "tick_volume": 30628
+        },
+        {
+          "time_iso": "2026-04-27T08:00:00Z",
+          "bars_ago": 2,
+          "open": 4713.307,
+          "high": 4714.82,
+          "low": 4699.391,
+          "close": 4704.753,
+          "tick_volume": 26502
+        },
+        {
+          "time_iso": "2026-04-27T12:00:00Z",
+          "bars_ago": 1,
+          "open": 4704.818,
+          "high": 4712.626,
+          "low": 4667.061,
+          "close": 4670.263,
+          "tick_volume": 62826
+        },
+        {
+          "time_iso": "2026-04-27T16:00:00Z",
+          "bars_ago": 0,
+          "open": 4670.235,
+          "high": 4678.311,
+          "low": 4667.286,
+          "close": 4677.502,
+          "tick_volume": 5413
+        }
+      ],
+      "H1": [
+        {
+          "time_iso": "2026-04-24T15:00:00Z",
+          "bars_ago": 24,
+          "open": 4726.569,
+          "high": 4733.468,
+          "low": 4714.575,
+          "close": 4727.112,
+          "tick_volume": 20439
+        },
+        {
+          "time_iso": "2026-04-24T16:00:00Z",
+          "bars_ago": 23,
+          "open": 4727.029,
+          "high": 4729.813,
+          "low": 4719.047,
+          "close": 4726.624,
+          "tick_volume": 12020
+        },
+        {
+          "time_iso": "2026-04-24T17:00:00Z",
+          "bars_ago": 22,
+          "open": 4726.68,
+          "high": 4730.258,
+          "low": 4718.917,
+          "close": 4723.524,
+          "tick_volume": 10569
+        },
+        {
+          "time_iso": "2026-04-24T18:00:00Z",
+          "bars_ago": 21,
+          "open": 4723.594,
+          "high": 4724.929,
+          "low": 4716.919,
+          "close": 4722.633,
+          "tick_volume": 6920
+        },
+        {
+          "time_iso": "2026-04-24T19:00:00Z",
+          "bars_ago": 20,
+          "open": 4722.691,
+          "high": 4726.131,
+          "low": 4713.609,
+          "close": 4716.781,
+          "tick_volume": 7115
+        },
+        {
+          "time_iso": "2026-04-24T20:00:00Z",
+          "bars_ago": 19,
+          "open": 4716.719,
+          "high": 4717.579,
+          "low": 4705.345,
+          "close": 4708.598,
+          "tick_volume": 5584
+        },
+        {
+          "time_iso": "2026-04-26T22:00:00Z",
+          "bars_ago": 18,
+          "open": 4696.256,
+          "high": 4700.016,
+          "low": 4680.24,
+          "close": 4684.829,
+          "tick_volume": 6663
+        },
+        {
+          "time_iso": "2026-04-26T23:00:00Z",
+          "bars_ago": 17,
+          "open": 4684.747,
+          "high": 4684.873,
+          "low": 4674.961,
+          "close": 4680.187,
+          "tick_volume": 5372
+        },
+        {
+          "time_iso": "2026-04-27T00:00:00Z",
+          "bars_ago": 16,
+          "open": 4680.25,
+          "high": 4698.062,
+          "low": 4672.138,
+          "close": 4697.877,
+          "tick_volume": 9511
+        },
+        {
+          "time_iso": "2026-04-27T01:00:00Z",
+          "bars_ago": 15,
+          "open": 4697.799,
+          "high": 4710.024,
+          "low": 4690.967,
+          "close": 4702.601,
+          "tick_volume": 16805
+        },
+        {
+          "time_iso": "2026-04-27T02:00:00Z",
+          "bars_ago": 14,
+          "open": 4702.899,
+          "high": 4723.614,
+          "low": 4696.241,
+          "close": 4718.449,
+          "tick_volume": 11044
+        },
+        {
+          "time_iso": "2026-04-27T03:00:00Z",
+          "bars_ago": 13,
+          "open": 4718.367,
+          "high": 4729.564,
+          "low": 4714.654,
+          "close": 4724.18,
+          "tick_volume": 8457
+        },
+        {
+          "time_iso": "2026-04-27T04:00:00Z",
+          "bars_ago": 12,
+          "open": 4724.027,
+          "high": 4730.256,
+          "low": 4722.805,
+          "close": 4724.926,
+          "tick_volume": 5635
+        },
+        {
+          "time_iso": "2026-04-27T05:00:00Z",
+          "bars_ago": 11,
+          "open": 4724.915,
+          "high": 4725.529,
+          "low": 4708.758,
+          "close": 4710.258,
+          "tick_volume": 8104
+        },
+        {
+          "time_iso": "2026-04-27T06:00:00Z",
+          "bars_ago": 10,
+          "open": 4710.198,
+          "high": 4715.712,
+          "low": 4709.208,
+          "close": 4712.726,
+          "tick_volume": 8643
+        },
+        {
+          "time_iso": "2026-04-27T07:00:00Z",
+          "bars_ago": 9,
+          "open": 4712.841,
+          "high": 4718.234,
+          "low": 4710.15,
+          "close": 4713.538,
+          "tick_volume": 8246
+        },
+        {
+          "time_iso": "2026-04-27T08:00:00Z",
+          "bars_ago": 8,
+          "open": 4713.307,
+          "high": 4714.82,
+          "low": 4705.414,
+          "close": 4707.02,
+          "tick_volume": 7798
+        },
+        {
+          "time_iso": "2026-04-27T09:00:00Z",
+          "bars_ago": 7,
+          "open": 4706.786,
+          "high": 4708.332,
+          "low": 4699.391,
+          "close": 4703.567,
+          "tick_volume": 6614
+        },
+        {
+          "time_iso": "2026-04-27T10:00:00Z",
+          "bars_ago": 6,
+          "open": 4703.628,
+          "high": 4711.167,
+          "low": 4699.734,
+          "close": 4708.995,
+          "tick_volume": 5428
+        },
+        {
+          "time_iso": "2026-04-27T11:00:00Z",
+          "bars_ago": 5,
+          "open": 4709.051,
+          "high": 4709.152,
+          "low": 4700.042,
+          "close": 4704.753,
+          "tick_volume": 6662
+        },
+        {
+          "time_iso": "2026-04-27T12:00:00Z",
+          "bars_ago": 4,
+          "open": 4704.818,
+          "high": 4712.626,
+          "low": 4696.906,
+          "close": 4699.4,
+          "tick_volume": 10931
+        },
+        {
+          "time_iso": "2026-04-27T13:00:00Z",
+          "bars_ago": 3,
+          "open": 4699.46,
+          "high": 4703.544,
+          "low": 4689.061,
+          "close": 4696.063,
+          "tick_volume": 17281
+        },
+        {
+          "time_iso": "2026-04-27T14:00:00Z",
+          "bars_ago": 2,
+          "open": 4696.124,
+          "high": 4696.884,
+          "low": 4676.466,
+          "close": 4677.964,
+          "tick_volume": 18753
+        },
+        {
+          "time_iso": "2026-04-27T15:00:00Z",
+          "bars_ago": 1,
+          "open": 4678.315,
+          "high": 4682.414,
+          "low": 4667.061,
+          "close": 4670.263,
+          "tick_volume": 15861
+        },
+        {
+          "time_iso": "2026-04-27T16:00:00Z",
+          "bars_ago": 0,
+          "open": 4670.235,
+          "high": 4678.311,
+          "low": 4667.286,
+          "close": 4677.502,
+          "tick_volume": 5413
+        }
+      ],
+      "M15": [
+        {
+          "time_iso": "2026-04-27T04:15:00Z",
+          "bars_ago": 49,
+          "open": 4727.443,
+          "high": 4727.923,
+          "low": 4725.051,
+          "close": 4726.871,
+          "tick_volume": 1246
+        },
+        {
+          "time_iso": "2026-04-27T04:30:00Z",
+          "bars_ago": 48,
+          "open": 4727.183,
+          "high": 4730.256,
+          "low": 4725.365,
+          "close": 4726.203,
+          "tick_volume": 1584
+        },
+        {
+          "time_iso": "2026-04-27T04:45:00Z",
+          "bars_ago": 47,
+          "open": 4726.497,
+          "high": 4726.835,
+          "low": 4722.805,
+          "close": 4724.926,
+          "tick_volume": 1384
+        },
+        {
+          "time_iso": "2026-04-27T05:00:00Z",
+          "bars_ago": 46,
+          "open": 4724.915,
+          "high": 4725.529,
+          "low": 4718.336,
+          "close": 4718.613,
+          "tick_volume": 1605
+        },
+        {
+          "time_iso": "2026-04-27T05:15:00Z",
+          "bars_ago": 45,
+          "open": 4718.595,
+          "high": 4720.066,
+          "low": 4716.124,
+          "close": 4718.031,
+          "tick_volume": 1564
+        },
+        {
+          "time_iso": "2026-04-27T05:30:00Z",
+          "bars_ago": 44,
+          "open": 4718.386,
+          "high": 4718.519,
+          "low": 4709.198,
+          "close": 4711.684,
+          "tick_volume": 2853
+        },
+        {
+          "time_iso": "2026-04-27T05:45:00Z",
+          "bars_ago": 43,
+          "open": 4711.694,
+          "high": 4713.924,
+          "low": 4708.758,
+          "close": 4710.258,
+          "tick_volume": 2082
+        },
+        {
+          "time_iso": "2026-04-27T06:00:00Z",
+          "bars_ago": 42,
+          "open": 4710.198,
+          "high": 4715.674,
+          "low": 4709.391,
+          "close": 4714.324,
+          "tick_volume": 2762
+        },
+        {
+          "time_iso": "2026-04-27T06:15:00Z",
+          "bars_ago": 41,
+          "open": 4714.673,
+          "high": 4715.712,
+          "low": 4711.271,
+          "close": 4714.405,
+          "tick_volume": 1928
+        },
+        {
+          "time_iso": "2026-04-27T06:30:00Z",
+          "bars_ago": 40,
+          "open": 4714.348,
+          "high": 4714.516,
+          "low": 4709.208,
+          "close": 4710.976,
+          "tick_volume": 2221
+        },
+        {
+          "time_iso": "2026-04-27T06:45:00Z",
+          "bars_ago": 39,
+          "open": 4710.914,
+          "high": 4715.663,
+          "low": 4710.012,
+          "close": 4712.726,
+          "tick_volume": 1732
+        },
+        {
+          "time_iso": "2026-04-27T07:00:00Z",
+          "bars_ago": 38,
+          "open": 4712.841,
+          "high": 4718.175,
+          "low": 4710.968,
+          "close": 4717.089,
+          "tick_volume": 2369
+        },
+        {
+          "time_iso": "2026-04-27T07:15:00Z",
+          "bars_ago": 37,
+          "open": 4717.064,
+          "high": 4718.234,
+          "low": 4712.536,
+          "close": 4715.922,
+          "tick_volume": 2014
+        },
+        {
+          "time_iso": "2026-04-27T07:30:00Z",
+          "bars_ago": 36,
+          "open": 4716.218,
+          "high": 4717.531,
+          "low": 4713.715,
+          "close": 4715.045,
+          "tick_volume": 2028
+        },
+        {
+          "time_iso": "2026-04-27T07:45:00Z",
+          "bars_ago": 35,
+          "open": 4715.072,
+          "high": 4717.02,
+          "low": 4710.15,
+          "close": 4713.538,
+          "tick_volume": 1835
+        },
+        {
+          "time_iso": "2026-04-27T08:00:00Z",
+          "bars_ago": 34,
+          "open": 4713.307,
+          "high": 4714.318,
+          "low": 4710.176,
+          "close": 4711.1,
+          "tick_volume": 2369
+        },
+        {
+          "time_iso": "2026-04-27T08:15:00Z",
+          "bars_ago": 33,
+          "open": 4711.16,
+          "high": 4714.262,
+          "low": 4709.534,
+          "close": 4710.588,
+          "tick_volume": 1838
+        },
+        {
+          "time_iso": "2026-04-27T08:30:00Z",
+          "bars_ago": 32,
+          "open": 4710.649,
+          "high": 4711.818,
+          "low": 4705.414,
+          "close": 4711.777,
+          "tick_volume": 1824
+        },
+        {
+          "time_iso": "2026-04-27T08:45:00Z",
+          "bars_ago": 31,
+          "open": 4711.769,
+          "high": 4714.82,
+          "low": 4705.503,
+          "close": 4707.02,
+          "tick_volume": 1767
+        },
+        {
+          "time_iso": "2026-04-27T09:00:00Z",
+          "bars_ago": 30,
+          "open": 4706.786,
+          "high": 4708.332,
+          "low": 4702.514,
+          "close": 4705.385,
+          "tick_volume": 1814
+        },
+        {
+          "time_iso": "2026-04-27T09:15:00Z",
+          "bars_ago": 29,
+          "open": 4705.472,
+          "high": 4706.728,
+          "low": 4701.394,
+          "close": 4702.499,
+          "tick_volume": 1572
+        },
+        {
+          "time_iso": "2026-04-27T09:30:00Z",
+          "bars_ago": 28,
+          "open": 4702.441,
+          "high": 4705.654,
+          "low": 4699.391,
+          "close": 4704.547,
+          "tick_volume": 1781
+        },
+        {
+          "time_iso": "2026-04-27T09:45:00Z",
+          "bars_ago": 27,
+          "open": 4704.542,
+          "high": 4704.844,
+          "low": 4699.705,
+          "close": 4703.567,
+          "tick_volume": 1447
+        },
+        {
+          "time_iso": "2026-04-27T10:00:00Z",
+          "bars_ago": 26,
+          "open": 4703.628,
+          "high": 4706.958,
+          "low": 4701.605,
+          "close": 4702.164,
+          "tick_volume": 1293
+        },
+        {
+          "time_iso": "2026-04-27T10:15:00Z",
+          "bars_ago": 25,
+          "open": 4702.159,
+          "high": 4705.76,
+          "low": 4699.734,
+          "close": 4704.981,
+          "tick_volume": 1231
+        },
+        {
+          "time_iso": "2026-04-27T10:30:00Z",
+          "bars_ago": 24,
+          "open": 4705.038,
+          "high": 4710.815,
+          "low": 4704.586,
+          "close": 4708.952,
+          "tick_volume": 1456
+        },
+        {
+          "time_iso": "2026-04-27T10:45:00Z",
+          "bars_ago": 23,
+          "open": 4709.009,
+          "high": 4711.167,
+          "low": 4707.069,
+          "close": 4708.995,
+          "tick_volume": 1448
+        },
+        {
+          "time_iso": "2026-04-27T11:00:00Z",
+          "bars_ago": 22,
+          "open": 4709.051,
+          "high": 4709.152,
+          "low": 4704.08,
+          "close": 4704.275,
+          "tick_volume": 1581
+        },
+        {
+          "time_iso": "2026-04-27T11:15:00Z",
+          "bars_ago": 21,
+          "open": 4704.28,
+          "high": 4707.145,
+          "low": 4700.201,
+          "close": 4705.432,
+          "tick_volume": 1880
+        },
+        {
+          "time_iso": "2026-04-27T11:30:00Z",
+          "bars_ago": 20,
+          "open": 4705.373,
+          "high": 4708.758,
+          "low": 4700.042,
+          "close": 4702.685,
+          "tick_volume": 1805
+        },
+        {
+          "time_iso": "2026-04-27T11:45:00Z",
+          "bars_ago": 19,
+          "open": 4702.958,
+          "high": 4705.295,
+          "low": 4701.068,
+          "close": 4704.753,
+          "tick_volume": 1396
+        },
+        {
+          "time_iso": "2026-04-27T12:00:00Z",
+          "bars_ago": 18,
+          "open": 4704.818,
+          "high": 4709.414,
+          "low": 4702.572,
+          "close": 4708.902,
+          "tick_volume": 2227
+        },
+        {
+          "time_iso": "2026-04-27T12:15:00Z",
+          "bars_ago": 17,
+          "open": 4708.924,
+          "high": 4712.626,
+          "low": 4701.869,
+          "close": 4706.958,
+          "tick_volume": 3020
+        },
+        {
+          "time_iso": "2026-04-27T12:30:00Z",
+          "bars_ago": 16,
+          "open": 4706.899,
+          "high": 4707.915,
+          "low": 4697.144,
+          "close": 4698.811,
+          "tick_volume": 2910
+        },
+        {
+          "time_iso": "2026-04-27T12:45:00Z",
+          "bars_ago": 15,
+          "open": 4698.699,
+          "high": 4704.446,
+          "low": 4696.906,
+          "close": 4699.4,
+          "tick_volume": 2774
+        },
+        {
+          "time_iso": "2026-04-27T13:00:00Z",
+          "bars_ago": 14,
+          "open": 4699.46,
+          "high": 4700.747,
+          "low": 4693.136,
+          "close": 4696.176,
+          "tick_volume": 4533
+        },
+        {
+          "time_iso": "2026-04-27T13:15:00Z",
+          "bars_ago": 13,
+          "open": 4696.149,
+          "high": 4703.544,
+          "low": 4695.724,
+          "close": 4700.052,
+          "tick_volume": 2519
+        },
+        {
+          "time_iso": "2026-04-27T13:30:00Z",
+          "bars_ago": 12,
+          "open": 4699.938,
+          "high": 4702.688,
+          "low": 4689.061,
+          "close": 4693.199,
+          "tick_volume": 5569
+        },
+        {
+          "time_iso": "2026-04-27T13:45:00Z",
+          "bars_ago": 11,
+          "open": 4693.328,
+          "high": 4697.57,
+          "low": 4689.289,
+          "close": 4696.063,
+          "tick_volume": 4660
+        },
+        {
+          "time_iso": "2026-04-27T14:00:00Z",
+          "bars_ago": 10,
+          "open": 4696.124,
+          "high": 4696.407,
+          "low": 4687.777,
+          "close": 4692.618,
+          "tick_volume": 5293
+        },
+        {
+          "time_iso": "2026-04-27T14:15:00Z",
+          "bars_ago": 9,
+          "open": 4692.446,
+          "high": 4696.741,
+          "low": 4686.229,
+          "close": 4689.151,
+          "tick_volume": 4303
+        },
+        {
+          "time_iso": "2026-04-27T14:30:00Z",
+          "bars_ago": 8,
+          "open": 4689.229,
+          "high": 4696.884,
+          "low": 4683.537,
+          "close": 4693.687,
+          "tick_volume": 5208
+        },
+        {
+          "time_iso": "2026-04-27T14:45:00Z",
+          "bars_ago": 7,
+          "open": 4693.747,
+          "high": 4694.133,
+          "low": 4676.466,
+          "close": 4677.964,
+          "tick_volume": 3949
+        },
+        {
+          "time_iso": "2026-04-27T15:00:00Z",
+          "bars_ago": 6,
+          "open": 4678.315,
+          "high": 4679.562,
+          "low": 4667.061,
+          "close": 4674.496,
+          "tick_volume": 5700
+        },
+        {
+          "time_iso": "2026-04-27T15:15:00Z",
+          "bars_ago": 5,
+          "open": 4674.427,
+          "high": 4681.152,
+          "low": 4671.929,
+          "close": 4681.023,
+          "tick_volume": 4176
+        },
+        {
+          "time_iso": "2026-04-27T15:30:00Z",
+          "bars_ago": 4,
+          "open": 4681.081,
+          "high": 4682.414,
+          "low": 4677.008,
+          "close": 4677.789,
+          "tick_volume": 2971
+        },
+        {
+          "time_iso": "2026-04-27T15:45:00Z",
+          "bars_ago": 3,
+          "open": 4677.731,
+          "high": 4678.144,
+          "low": 4667.952,
+          "close": 4670.263,
+          "tick_volume": 3014
+        },
+        {
+          "time_iso": "2026-04-27T16:00:00Z",
+          "bars_ago": 2,
+          "open": 4670.235,
+          "high": 4674.975,
+          "low": 4667.286,
+          "close": 4674.451,
+          "tick_volume": 2787
+        },
+        {
+          "time_iso": "2026-04-27T16:15:00Z",
+          "bars_ago": 1,
+          "open": 4674.39,
+          "high": 4677.847,
+          "low": 4673.719,
+          "close": 4676.25,
+          "tick_volume": 2231
+        },
+        {
+          "time_iso": "2026-04-27T16:30:00Z",
+          "bars_ago": 0,
+          "open": 4676.32,
+          "high": 4678.311,
+          "low": 4675.826,
+          "close": 4677.502,
+          "tick_volume": 395
+        }
+      ]
+    },
+    "indicators": {
+      "H1": {
+        "current_price": 4677.502,
+        "basic_indicators": {
+          "SMA_20": 4701.185,
+          "SMA_50": 4702.361,
+          "EMA_20": 4698.27,
+          "ATR_14": 12.115,
+          "RSI_14": 26.137,
+          "MACD": {
+            "macd": -6.485,
+            "signal": -2.216,
+            "hist": -4.269
+          }
+        },
+        "advanced_indicators": {
+          "VolumeProfile_POC": 4792.565,
+          "VolumeProfile_VAL": 4674.901,
+          "VolumeProfile_VAH": 4822.821,
+          "Trend_Exhaustion": {
+            "is_overbought": false,
+            "is_oversold": false,
+            "ob_reversal": false,
+            "os_reversal": false
+          },
+          "Market_Structure": "LH_LL",
+          "Structure_High": 4730.256,
+          "Structure_Low": 4699.391
+        },
+        "active_zones": [
+          {
+            "evidence_id": "zone_H1_1e59dce564",
+            "type": "resistance",
+            "level_zone_bottom_edge_price": 4703.303,
+            "level_zone_top_edge_price": 4704.243,
+            "score": 41.276,
+            "touches": 6,
+            "last_touch_time_iso": "2026-04-27T13:00:00Z",
+            "last_touch_age_candles": 3,
+            "distance_to_price_points": 26.271,
+            "distance_pct": 0.006
+          },
+          {
+            "evidence_id": "zone_H1_3a14cd681d",
+            "type": "resistance",
+            "level_zone_bottom_edge_price": 4765.255,
+            "level_zone_top_edge_price": 4766.195,
+            "score": 57.616,
+            "touches": 12,
+            "last_touch_time_iso": "2026-04-22T07:00:00Z",
+            "last_touch_age_candles": 78,
+            "distance_to_price_points": 88.223,
+            "distance_pct": 0.019
+          },
+          {
+            "evidence_id": "zone_H1_753887a724",
+            "type": "resistance",
+            "level_zone_bottom_edge_price": 4776.711,
+            "level_zone_top_edge_price": 4777.651,
+            "score": 70.921,
+            "touches": 9,
+            "last_touch_time_iso": "2026-04-21T13:00:00Z",
+            "last_touch_age_candles": 95,
+            "distance_to_price_points": 99.679,
+            "distance_pct": 0.021
+          },
+          {
+            "evidence_id": "zone_H1_0689804508",
+            "type": "support",
+            "level_zone_bottom_edge_price": 4671.324,
+            "level_zone_top_edge_price": 4672.264,
+            "score": 68.593,
+            "touches": 7,
+            "last_touch_time_iso": "2026-04-24T06:00:00Z",
+            "last_touch_age_candles": 33,
+            "distance_to_price_points": 5.708,
+            "distance_pct": 0.001
+          }
+        ],
+        "recent_structure_breaks": [
+          {
+            "evidence_id": "break_H1_74fd4a62fe",
+            "type": "ChoCh Bull",
+            "level_price": 4827.861,
+            "time_iso": "2026-04-20T22:00:00Z",
+            "age_candles": 110,
+            "distance_to_price_points": 150.359
+          },
+          {
+            "evidence_id": "break_H1_bfcc8f9ed8",
+            "type": "ChoCh Bear",
+            "level_price": 4736.938,
+            "time_iso": "2026-04-21T16:00:00Z",
+            "age_candles": 92,
+            "distance_to_price_points": 59.436
+          },
+          {
+            "evidence_id": "break_H1_11bc2f8f46",
+            "type": "BoS Bear",
+            "level_price": 4723.788,
+            "time_iso": "2026-04-23T01:00:00Z",
+            "age_candles": 61,
+            "distance_to_price_points": 46.286
+          },
+          {
+            "evidence_id": "break_H1_d869a9b078",
+            "type": "ChoCh Bull",
+            "level_price": 4711.215,
+            "time_iso": "2026-04-24T13:00:00Z",
+            "age_candles": 26,
+            "distance_to_price_points": 33.713
+          },
+          {
+            "evidence_id": "break_H1_44f59af208",
+            "type": "ChoCh Bear",
+            "level_price": 4672.138,
+            "time_iso": "2026-04-27T15:00:00Z",
+            "age_candles": 1,
+            "distance_to_price_points": 5.364
+          }
+        ]
+      },
+      "M15": {
+        "current_price": 4677.502,
+        "basic_indicators": {
+          "SMA_20": 4689.475,
+          "SMA_50": 4702.682,
+          "EMA_20": 4686.79,
+          "ATR_14": 9.393,
+          "RSI_14": 36.42,
+          "MACD": {
+            "macd": -8.205,
+            "signal": -7.144,
+            "hist": -1.061
+          }
+        },
+        "advanced_indicators": {
+          "VolumeProfile_POC": 4706.489,
+          "VolumeProfile_VAL": 4671.634,
+          "VolumeProfile_VAH": 4787.817,
+          "Trend_Exhaustion": {
+            "is_overbought": false,
+            "is_oversold": true,
+            "ob_reversal": false,
+            "os_reversal": false
+          },
+          "Market_Structure": "Consolidation",
+          "Structure_High": 4682.414,
+          "Structure_Low": 4667.061
+        },
+        "active_zones": [
+          {
+            "evidence_id": "zone_M15_5c24734d2a",
+            "type": "resistance",
+            "level_zone_bottom_edge_price": 4686.507,
+            "level_zone_top_edge_price": 4686.958,
+            "score": 8.467,
+            "touches": 2,
+            "last_touch_time_iso": "2026-04-26T22:15:00Z",
+            "last_touch_age_candles": 73,
+            "distance_to_price_points": 9.231,
+            "distance_pct": 0.002
+          },
+          {
+            "evidence_id": "zone_M15_3ff6b70341",
+            "type": "resistance",
+            "level_zone_bottom_edge_price": 4697.635,
+            "level_zone_top_edge_price": 4698.086,
+            "score": 89.118,
+            "touches": 13,
+            "last_touch_time_iso": "2026-04-27T01:30:00Z",
+            "last_touch_age_candles": 60,
+            "distance_to_price_points": 20.358,
+            "distance_pct": 0.004
+          },
+          {
+            "evidence_id": "zone_M15_d91590e525",
+            "type": "resistance",
+            "level_zone_bottom_edge_price": 4711.731,
+            "level_zone_top_edge_price": 4712.182,
+            "score": 57.199,
+            "touches": 10,
+            "last_touch_time_iso": "2026-04-27T08:45:00Z",
+            "last_touch_age_candles": 31,
+            "distance_to_price_points": 34.455,
+            "distance_pct": 0.007
+          },
+          {
+            "evidence_id": "zone_M15_8d52cdca5a",
+            "type": "support",
+            "level_zone_bottom_edge_price": 4669.812,
+            "level_zone_top_edge_price": 4670.263,
+            "score": 23.967,
+            "touches": 5,
+            "last_touch_time_iso": "2026-04-27T16:00:00Z",
+            "last_touch_age_candles": 2,
+            "distance_to_price_points": 7.464,
+            "distance_pct": 0.002
+          }
+        ],
+        "recent_structure_breaks": [
+          {
+            "evidence_id": "break_M15_92e382966a",
+            "type": "BoS Bull",
+            "level_price": 4717.523,
+            "time_iso": "2026-04-24T14:00:00Z",
+            "age_candles": 102,
+            "distance_to_price_points": 40.021
+          },
+          {
+            "evidence_id": "break_M15_31ed59a4a1",
+            "type": "ChoCh Bear",
+            "level_price": 4714.575,
+            "time_iso": "2026-04-24T20:00:00Z",
+            "age_candles": 78,
+            "distance_to_price_points": 37.073
+          },
+          {
+            "evidence_id": "break_M15_a5d9d5680c",
+            "type": "ChoCh Bull",
+            "level_price": 4710.024,
+            "time_iso": "2026-04-27T02:30:00Z",
+            "age_candles": 56,
+            "distance_to_price_points": 32.522
+          },
+          {
+            "evidence_id": "break_M15_a0846e8ae5",
+            "type": "ChoCh Bear",
+            "level_price": 4708.758,
+            "time_iso": "2026-04-27T08:45:00Z",
+            "age_candles": 31,
+            "distance_to_price_points": 31.256
+          },
+          {
+            "evidence_id": "break_M15_0118be637a",
+            "type": "BoS Bear",
+            "level_price": 4699.391,
+            "time_iso": "2026-04-27T12:30:00Z",
+            "age_candles": 16,
+            "distance_to_price_points": 21.889
+          }
+        ]
+      }
+    },
+    "patterns": {
+      "M15": {
+        "candlestick": [],
+        "rectangle_ranges": [
+          {
+            "id": "rectangle_range",
+            "type": "rectangle_range",
+            "direction": "Neutral",
+            "strength": "Strong",
+            "score": 58.334,
+            "evidence": {
+              "top": 4730.256,
+              "bottom": 4674.767,
+              "margin": 2.348,
+              "touches": {
+                "top": 5,
+                "bottom": 4,
+                "events": [
+                  "B",
+                  "T",
+                  "T",
+                  "T",
+                  "T",
+                  "B",
+                  "B",
+                  "T",
+                  "B"
+                ]
+              },
+              "from_time": 1777023900,
+              "to_time": 1777307400,
+              "containment": 0.992,
+              "height_atr": 5.907,
+              "drift_atr": 0.484,
+              "efficiency": 0.01
+            },
+            "zone": {
+              "type": "range_zone",
+              "top": 4730.256,
+              "bottom": 4674.767
+            },
+            "timeframe": "M15"
+          }
+        ],
+        "rectangle_candidates_total": 18
+      }
+    },
+    "pattern_events": {
+      "M15": [
+        {
+          "id": "bos_down",
+          "type": "bos",
+          "direction": "Bearish",
+          "strength": "Weak",
+          "score": 70.0,
+          "evidence": {
+            "structure": "Consolidation",
+            "level": 4700.042,
+            "bar_time": 1777307400,
+            "close": 4677.502,
+            "buffer": 0.0
+          },
+          "timeframe": "M15"
+        },
+        {
+          "id": "liquidity_sweep_down_recover",
+          "type": "liquidity_sweep",
+          "direction": "Bullish",
+          "strength": "Medium",
+          "score": 82.0,
+          "evidence": {
+            "key": "prev_day_low@4674.961",
+            "level": 4674.961,
+            "sweep_time": 1777306500,
+            "sweep_idx": 158,
+            "recover_time": 1777306500,
+            "recover_idx": 158,
+            "buffer": 0.47
+          },
+          "timeframe": "M15"
+        },
+        {
+          "id": "false_breakout_down",
+          "type": "false_breakout",
+          "direction": "Bullish",
+          "strength": "Medium",
+          "score": 76.0,
+          "evidence": {
+            "key": "zone@4674.961",
+            "top": 4675.111,
+            "bottom": 4674.811,
+            "bar_time": 1777306500,
+            "bar_idx": 118,
+            "buffer": 0.47,
+            "low": 4673.719,
+            "close": 4676.25,
+            "prev_close": 4674.451,
+            "source": "zone"
+          },
+          "timeframe": "M15"
+        },
+        {
+          "id": "close_outside_zone_down",
+          "type": "close_outside_level_zone",
+          "direction": "Bearish",
+          "strength": "Medium",
+          "score": 70.0,
+          "evidence": {
+            "zone": {
+              "top": 4700.166,
+              "bottom": 4699.866,
+              "from_time": 1777219200,
+              "to_time": 1777307400,
+              "kind": "prev_day_high",
+              "to_time_raw": 1777489200
+            },
+            "direction": "down",
+            "trigger_time": 1777307400,
+            "confirm_time": 1777307400,
+            "confirm_mode": "one_body",
+            "buffer": 0.0,
+            "body_margin": 0.939,
+            "bar_time": 1777307400,
+            "close": 4677.502,
+            "open": 4676.32
+          },
+          "timeframe": "M15"
+        },
+        {
+          "id": "close_outside_zone_up",
+          "type": "close_outside_level_zone",
+          "direction": "Bullish",
+          "strength": "Medium",
+          "score": 70.0,
+          "evidence": {
+            "zone": {
+              "top": 4675.111,
+              "bottom": 4674.811,
+              "from_time": 1777219200,
+              "to_time": 1777307400,
+              "kind": "prev_day_low",
+              "to_time_raw": 1777489200
+            },
+            "direction": "up",
+            "trigger_time": 1777307400,
+            "confirm_time": 1777307400,
+            "confirm_mode": "one_body",
+            "buffer": 0.0,
+            "body_margin": 0.939,
+            "bar_time": 1777307400,
+            "close": 4677.502,
+            "open": 4676.32
+          },
+          "timeframe": "M15"
+        },
+        {
+          "id": "close_outside_zone_down",
+          "type": "close_outside_level_zone",
+          "direction": "Bearish",
+          "strength": "Medium",
+          "score": 70.0,
+          "evidence": {
+            "zone": {
+              "top": 4730.406,
+              "bottom": 4730.106,
+              "from_time": 1777262400,
+              "to_time": 1777307400,
+              "kind": "swing_high",
+              "to_time_raw": 1777532400
+            },
+            "direction": "down",
+            "trigger_time": 1777307400,
+            "confirm_time": 1777307400,
+            "confirm_mode": "one_body",
+            "buffer": 0.0,
+            "body_margin": 0.939,
+            "bar_time": 1777307400,
+            "close": 4677.502,
+            "open": 4676.32
+          },
+          "timeframe": "M15"
+        }
+      ]
+    },
+    "structures": {
+      "M15": {
+        "levels": [
+          {
+            "price": 4700.016,
+            "kind": "prev_day_high",
+            "time": null
+          },
+          {
+            "price": 4674.961,
+            "kind": "prev_day_low",
+            "time": null
+          },
+          {
+            "price": 4730.256,
+            "kind": "swing_high",
+            "time": 1777262400
+          },
+          {
+            "price": 4740.389,
+            "kind": "swing_high",
+            "time": 1777032000
+          },
+          {
+            "price": 4657.692,
+            "kind": "swing_low",
+            "time": 1777003200
+          },
+          {
+            "price": 4772.488,
+            "kind": "swing_high",
+            "time": 1776830400
+          },
+          {
+            "price": 4668.34,
+            "kind": "swing_low",
+            "time": 1776787200
+          },
+          {
+            "price": 4833.22,
+            "kind": "swing_high",
+            "time": 1776715200
+          }
+        ],
+        "zones": [
+          {
+            "top": 4700.166,
+            "bottom": 4699.866,
+            "from_time": 1777219200,
+            "to_time": 1777489200,
+            "kind": "prev_day_high",
+            "center": 4700.016
+          },
+          {
+            "top": 4675.111,
+            "bottom": 4674.811,
+            "from_time": 1777219200,
+            "to_time": 1777489200,
+            "kind": "prev_day_low",
+            "center": 4674.961
+          },
+          {
+            "top": 4730.406,
+            "bottom": 4730.106,
+            "from_time": 1777262400,
+            "to_time": 1777532400,
+            "kind": "swing_high",
+            "center": 4730.256
+          },
+          {
+            "top": 4740.539,
+            "bottom": 4740.239,
+            "from_time": 1777032000,
+            "to_time": 1777302000,
+            "kind": "swing_high",
+            "center": 4740.389
+          },
+          {
+            "top": 4657.842,
+            "bottom": 4657.542,
+            "from_time": 1777003200,
+            "to_time": 1777273200,
+            "kind": "swing_low",
+            "center": 4657.692
+          },
+          {
+            "top": 4772.638,
+            "bottom": 4772.338,
+            "from_time": 1776830400,
+            "to_time": 1777100400,
+            "kind": "swing_high",
+            "center": 4772.488
+          },
+          {
+            "top": 4668.49,
+            "bottom": 4668.19,
+            "from_time": 1776787200,
+            "to_time": 1777057200,
+            "kind": "swing_low",
+            "center": 4668.34
+          },
+          {
+            "top": 4833.37,
+            "bottom": 4833.07,
+            "from_time": 1776715200,
+            "to_time": 1776985200,
+            "kind": "swing_high",
+            "center": 4833.22
+          }
+        ]
+      }
+    },
+    "computed_features": [
+      "candlestick",
+      "rectangle_range",
+      "structures.levels_zones",
+      "bos_choch",
+      "liquidity_sweep",
+      "false_breakout",
+      "close_outside_level_zone",
+      "breakout_retest_hold"
+    ]
+  },
+  "missing_indicators": [],
+  "constraints": {
+    "output_format": "strict_json",
+    "required_fields": [
+      "signal",
+      "confidence",
+      "reasoning",
+      "evidence_refs",
+      "position_state",
+      "decision_delta",
+      "entry_type",
+      "entry_price",
+      "stop_loss",
+      "take_profit",
+      "risk_reward_ratio",
+      "invalidation_condition",
+      "trade_horizon"
+    ],
+    "output_schema": {
+      "signal": {
+        "type": "string",
+        "enum": [
+          "buy",
+          "sell",
+          "hold"
+        ]
+      },
+      "confidence": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10,
+        "description": "信号置信度，1-10"
+      },
+      "reasoning": {
+        "type": "string",
+        "description": "3-5句核心逻辑，引用上下文证据，避免模糊词"
+      },
+      "evidence_refs": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "证据引用列表：填写 evidence_id（如 zone_M15_xxx / break_M15_xxx）"
+      },
+      "position_state": {
+        "type": "string",
+        "enum": [
+          "flat",
+          "long",
+          "short"
+        ],
+        "description": "当前仓位状态（逻辑持仓，不代表真实账户）"
+      },
+      "decision_delta": {
+        "type": "string",
+        "description": "相对上一触发的变化点；若反转必须说明触发了哪条失效条件"
+      },
+      "entry_type": {
+        "type": "string",
+        "enum": [
+          "market",
+          "limit"
+        ]
+      },
+      "entry_price": {
+        "type": "number"
+      },
+      "stop_loss": {
+        "type": "number"
+      },
+      "take_profit": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      },
+      "risk_reward_ratio": {
+        "type": "number"
+      },
+      "invalidation_condition": {
+        "type": "string"
+      },
+      "trade_horizon": {
+        "type": "string",
+        "enum": [
+          "scalp",
+          "intraday",
+          "swing"
+        ]
+      }
+    }
+  }
+}

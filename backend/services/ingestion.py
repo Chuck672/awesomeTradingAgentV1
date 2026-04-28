@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import calendar
 
 from backend.core.message_bus import message_bus, MarketMessage
-from backend.api.dependencies import get_current_broker_deps
+from backend.core.broker_context import get_current_broker_deps
 from backend.data_sources.mt5_source import MT5_AVAILABLE
 
 if MT5_AVAILABLE:

@@ -1,0 +1,225 @@
+{
+  "schema": "compact_agent_context_v1",
+  "generated_at_unix": 1777124721,
+  "source_dump": "D:\\TraeProjects\\awesomeTradingAgentV1\\tmp\\dump_XAUUSDz_M15_1777118651.json",
+  "event": {
+    "event_id": "dump_XAUUSDz_M15_1777118651",
+    "trigger_type": "manual_dump",
+    "trigger_text": "Manual dump for XAUUSDz M15 at 1777118651",
+    "symbol": "XAUUSDz",
+    "timeframe": "M15",
+    "snapshot_time": 1777046400
+  },
+  "market": {
+    "indicators_compact": {
+      "H1": {
+        "current_price": 4724.618,
+        "recent_bars": [
+          {
+            "time": 1777039200,
+            "open": 4711.681,
+            "high": 4740.389,
+            "low": 4706.926,
+            "close": 4726.506,
+            "tick_volume": 24372,
+            "delta_volume": 0,
+            "source": "poll"
+          },
+          {
+            "time": 1777042800,
+            "open": 4726.569,
+            "high": 4733.468,
+            "low": 4714.575,
+            "close": 4727.112,
+            "tick_volume": 20439,
+            "delta_volume": 0,
+            "source": "poll"
+          },
+          {
+            "time": 1777046400,
+            "open": 4727.029,
+            "high": 4729.813,
+            "low": 4719.047,
+            "close": 4724.618,
+            "tick_volume": 11169,
+            "delta_volume": 0,
+            "source": "poll"
+          }
+        ],
+        "basic_indicators": {
+          "SMA_20": 4695.54185,
+          "SMA_50": 4711.40972,
+          "EMA_20": 4704.265476351388,
+          "ATR_14": 20.41885714285724,
+          "RSI_14": 67.67742652781413,
+          "MACD": {
+            "macd": 2.256666633367786,
+            "signal": -3.9785134631419834,
+            "hist": 6.235180096509769
+          }
+        },
+        "advanced_indicators": {
+          "VolumeProfile_POC": 4792.6890532547895,
+          "VolumeProfile_VAL": 4666.47087703674,
+          "VolumeProfile_VAH": 4817.9326884984,
+          "Trend_Exhaustion": {
+            "is_overbought": false,
+            "is_oversold": false,
+            "ob_reversal": false,
+            "os_reversal": false
+          },
+          "Nearest_Resistance": {
+            "bottom": 4728.709,
+            "top": 4729.67923,
+            "from_time": 1775026800,
+            "to_time": 1777046400,
+            "last_touch_time": 1777042800,
+            "touches": 10,
+            "score": 94.49564525079168,
+            "level": 4728.709,
+            "avg_wick_excess": 9.400200000000222,
+            "type": "resistance",
+            "trade_score": 77.02501239189368
+          },
+          "Nearest_Support": {
+            "bottom": 4708.25577,
+            "top": 4709.226,
+            "from_time": 1775692800,
+            "to_time": 1777046400,
+            "last_touch_time": 1777039200,
+            "touches": 7,
+            "score": 94.95643630326612,
+            "level": 4709.226,
+            "avg_wick_excess": 14.414142857142647,
+            "type": "support",
+            "trade_score": 69.66312637401259
+          },
+          "Recent_Structure_Breaks": [
+            {
+              "type": "ChoCh Bear",
+              "level": 4736.938,
+              "time": 1776787200
+            },
+            {
+              "type": "BoS Bear",
+              "level": 4723.788,
+              "time": 1776906000
+            },
+            {
+              "type": "ChoCh Bull",
+              "level": 4711.215,
+              "time": 1777035600
+            }
+          ],
+          "Market_Structure": "HH_HL",
+          "Structure_High": 4697.29,
+          "Structure_Low": 4674.822
+        }
+      },
+      "M15": {
+        "current_price": 4724.734,
+        "recent_bars": [
+          {
+            "time": 1777047300,
+            "open": 4720.672,
+            "high": 4725.923,
+            "low": 4719.047,
+            "close": 4723.38,
+            "tick_volume": 2779,
+            "delta_volume": 0,
+            "source": "poll"
+          },
+          {
+            "time": 1777048200,
+            "open": 4723.443,
+            "high": 4727.281,
+            "low": 4719.156,
+            "close": 4722.478,
+            "tick_volume": 3033,
+            "delta_volume": 0,
+            "source": "poll"
+          },
+          {
+            "time": 1777049100,
+            "open": 4722.538,
+            "high": 4724.734,
+            "low": 4720.412,
+            "close": 4724.734,
+            "tick_volume": 1511,
+            "delta_volume": 0,
+            "source": "poll"
+          }
+        ],
+        "basic_indicators": {
+          "SMA_20": 4717.175300000001,
+          "SMA_50": 4697.96352,
+          "EMA_20": 4716.901012754518,
+          "ATR_14": 11.844571428571337,
+          "RSI_14": 68.72616427682995,
+          "MACD": {
+            "macd": 7.775220691190043,
+            "signal": 8.4275531005317,
+            "hist": -0.6523324093416569
+          }
+        },
+        "advanced_indicators": {
+          "VolumeProfile_POC": 4790.14018244805,
+          "VolumeProfile_VAL": 4708.8123511203,
+          "VolumeProfile_VAH": 4829.6422719501,
+          "Trend_Exhaustion": {
+            "is_overbought": false,
+            "is_oversold": false,
+            "ob_reversal": false,
+            "os_reversal": false
+          },
+          "Nearest_Resistance": {
+            "bottom": 4731.251,
+            "top": 4731.75338,
+            "from_time": 1776788100,
+            "to_time": 1777049100,
+            "last_touch_time": 1777041000,
+            "touches": 9,
+            "score": 62.6558223542032,
+            "level": 4731.251,
+            "avg_wick_excess": 3.76966666666653,
+            "type": "resistance",
+            "trade_score": 47.603093377539096
+          },
+          "Nearest_Support": {
+            "bottom": 4711.17862,
+            "top": 4711.681,
+            "from_time": 1776789900,
+            "to_time": 1777049100,
+            "last_touch_time": 1777039200,
+            "touches": 7,
+            "score": 47.48595655572714,
+            "level": 4711.681,
+            "avg_wick_excess": 3.9392857142854285,
+            "type": "support",
+            "trade_score": 30.945668759958338
+          },
+          "Recent_Structure_Breaks": [
+            {
+              "type": "ChoCh Bull",
+              "level": 4688.136,
+              "time": 1777016700
+            },
+            {
+              "type": "BoS Bull",
+              "level": 4697.29,
+              "time": 1777029300
+            },
+            {
+              "type": "BoS Bull",
+              "level": 4717.523,
+              "time": 1777039200
+            }
+          ],
+          "Market_Structure": "Consolidation",
+          "Structure_High": 4733.468,
+          "Structure_Low": 4714.575
+        }
+      }
+    }
+  }
+}
