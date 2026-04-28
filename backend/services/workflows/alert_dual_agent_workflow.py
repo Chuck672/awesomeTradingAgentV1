@@ -202,7 +202,83 @@ class AlertDualAgentWorkflow:
             analyzer_plan = {}
             analyzer_text = f"{{\"error\": \"{str(e)}\"}}"
 
-        report_lines.append(f"**Analyzer**: \n{analyzer_text}")
+        def _fill_take_profit(plan: dict) -> dict:
+            if not isinstance(plan, dict):
+                return plan
+            sig = str(plan.get("signal") or "").lower()
+            if sig not in ("buy", "sell"):
+                return plan
+            tp = plan.get("take_profit")
+            if tp is not None:
+                return plan
+            ep = plan.get("entry_price")
+            sl = plan.get("stop_loss")
+            if ep is None or sl is None:
+                return plan
+            rr = plan.get("risk_reward_ratio")
+            try:
+                rr_f = float(rr) if rr is not None else 2.0
+            except Exception:
+                rr_f = 2.0
+            rr_f = rr_f if rr_f > 0 else 2.0
+            try:
+                ep_f = float(ep)
+                sl_f = float(sl)
+            except Exception:
+                return plan
+            risk = abs(ep_f - sl_f)
+            if risk <= 0:
+                return plan
+            if sig == "buy":
+                plan["take_profit"] = ep_f + risk * rr_f
+            else:
+                plan["take_profit"] = ep_f - risk * rr_f
+            plan["risk_reward_ratio"] = rr_f
+            return plan
+
+        analyzer_plan = _fill_take_profit(analyzer_plan)
+        try:
+            analyzer_text = json.dumps(analyzer_plan, ensure_ascii=False, indent=2) if analyzer_plan else analyzer_text
+        except Exception:
+            pass
+
+        analyzer_raw = ""
+        try:
+            raw_prompt = (
+                "你是资深交易分析师。请基于下面的事件触发与上下文，输出一份详细的中文策略报告。\n"
+                "要求：必须引用输入 JSON 中的具体结构/指标/形态证据（例如 zone/break/bos/choch/pattern 的 id 与关键字段），并用因果链条说明结论。\n"
+                "输出使用 Markdown 分段：Trigger 解读/结构证据/指标证据/形态证据/推理链条/执行计划/失效条件。\n"
+            )
+            raw_msg = await asyncio.to_thread(
+                analyzer_llm.invoke,
+                [
+                    HumanMessage(
+                        content=(
+                            raw_prompt
+                            + "\n\nDecision State JSON:\n```json\n"
+                            + json.dumps(decision_state, ensure_ascii=False)
+                            + "\n```"
+                            + "\n\n事件触发描述:\n"
+                            + str(trigger_text)
+                            + "\n\n上下文 JSON:\n```json\n"
+                            + context_json
+                            + "\n```"
+                        )
+                    )
+                ],
+            )
+            analyzer_raw = str(getattr(raw_msg, "content", "") or "").strip()
+        except Exception as e:
+            logger.exception("event_dual analyzer_raw_failed session=%s err=%s", session_id, str(e))
+            analyzer_raw = f"(analyzer_raw_failed) {str(e)}"
+
+        report_lines.append("**AnalyzerPlan (JSON)**:")
+        report_lines.append("```json")
+        report_lines.append(analyzer_text)
+        report_lines.append("```")
+        if analyzer_raw:
+            report_lines.append("**AnalyzerRaw (Full Reply)**:")
+            report_lines.append(analyzer_raw)
         await agent_comm.broadcast_status(session_id, "analyzer", "finished", analyzer_text)
 
         analyzer_plan_json = ""

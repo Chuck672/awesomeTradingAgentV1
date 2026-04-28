@@ -9,6 +9,22 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+def _split_telegram_text(text: str, max_len: int = 3500) -> list[str]:
+    t = str(text or "")
+    if not t:
+        return [""]
+    parts: list[str] = []
+    while t:
+        if len(t) <= max_len:
+            parts.append(t)
+            break
+        cut = t.rfind("\n", 0, max_len)
+        if cut < 800:
+            cut = max_len
+        parts.append(t[:cut])
+        t = t[cut:].lstrip("\n")
+    return parts
+
 
 def send_telegram_message(*, bot_token: str, chat_id: str, text: str, timeout_sec: int = 15) -> Optional[str]:
     """
@@ -21,37 +37,36 @@ def send_telegram_message(*, bot_token: str, chat_id: str, text: str, timeout_se
         return None
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": cid, "text": text, "parse_mode": "Markdown"}
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
     ctx = ssl.create_default_context()
-    
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_sec, context=ctx) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            j = json.loads(raw)
-            if isinstance(j, dict) and j.get("ok") and isinstance(j.get("result"), dict):
-                return str(j["result"].get("message_id") or "")
-    except urllib.error.HTTPError as e:
-        # If it's a 400 Bad Request, it's almost certainly a Markdown parsing error.
-        # Fallback to plain text.
-        if e.code == 400:
-            logger.warning("telegram_markdown_failed http=400 fallback=plain_text")
-            payload["parse_mode"] = "" # Remove parse_mode
-            data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(url, data=data, method="POST")
-            req.add_header("Content-Type", "application/json")
-            try:
-                with urllib.request.urlopen(req, timeout=timeout_sec, context=ctx) as resp:
-                    raw = resp.read().decode("utf-8", errors="replace")
-                    j = json.loads(raw)
-                    if isinstance(j, dict) and j.get("ok") and isinstance(j.get("result"), dict):
-                        return str(j["result"].get("message_id") or "")
-            except Exception as e2:
-                logger.exception("telegram_plain_text_fallback_failed err=%s", str(e2))
-                raise e2
-        else:
-            raise e
-    return None
 
+    last_msg_id: Optional[str] = None
+    for idx, chunk in enumerate(_split_telegram_text(text, 3500)):
+        payload = {"chat_id": cid, "text": chunk, "parse_mode": "Markdown"}
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_sec, context=ctx) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                j = json.loads(raw)
+                if isinstance(j, dict) and j.get("ok") and isinstance(j.get("result"), dict):
+                    last_msg_id = str(j["result"].get("message_id") or "") or last_msg_id
+        except urllib.error.HTTPError as e:
+            if e.code == 400:
+                logger.warning("telegram_markdown_failed http=400 fallback=plain_text")
+                payload["parse_mode"] = ""
+                data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(url, data=data, method="POST")
+                req.add_header("Content-Type", "application/json")
+                try:
+                    with urllib.request.urlopen(req, timeout=timeout_sec, context=ctx) as resp:
+                        raw = resp.read().decode("utf-8", errors="replace")
+                        j = json.loads(raw)
+                        if isinstance(j, dict) and j.get("ok") and isinstance(j.get("result"), dict):
+                            last_msg_id = str(j["result"].get("message_id") or "") or last_msg_id
+                except Exception as e2:
+                    logger.exception("telegram_plain_text_fallback_failed err=%s", str(e2))
+                    raise e2
+            else:
+                raise e
+    return last_msg_id
