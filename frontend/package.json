@@ -1,8 +1,8 @@
 {
-  "name": "awesome-chart-v3",
+  "name": "awesome-trading-agent",
   "version": "3.1.0-beta",
   "author": "QuantLogicLab",
-  "description": "Awesome Chart Application",
+  "description": "awesomeTradingAgent",
   "private": true,
   "repository": {
     "type": "git",
@@ -21,14 +21,23 @@
     "electron": "wait-on http://localhost:3000 && electron ."
   },
   "build": {
-    "appId": "com.awesome.chart",
-    "productName": "AwesomeChartV3",
+    "appId": "com.awesome.tradingagent",
+    "productName": "awesomeTradingAgent",
     "directories": {
       "output": "dist_electron"
     },
     "files": [
       "main.js",
       "out/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "extraResources",
+        "to": "extraResources",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "win": {
       "target": [

@@ -20,6 +20,24 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install Python Dependencies & PyInstaller
+        working-directory: .
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Python Backend
+        working-directory: .
+        run: |
+          pyinstaller --onefile --name api-server --hidden-import="uvicorn.logging" --hidden-import="uvicorn.loops" --hidden-import="uvicorn.loops.auto" --hidden-import="uvicorn.protocols" --hidden-import="uvicorn.protocols.http" --hidden-import="uvicorn.protocols.http.auto" --hidden-import="uvicorn.protocols.websockets" --hidden-import="uvicorn.protocols.websockets.auto" --hidden-import="uvicorn.lifespan" --hidden-import="uvicorn.lifespan.on" run_backend.py
+          New-Item -ItemType Directory -Force -Path frontend\extraResources
+          Copy-Item dist\api-server.exe frontend\extraResources\
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -27,7 +45,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: './frontend/package-lock.json'
 
-      - name: Install Dependencies
+      - name: Install Frontend Dependencies
         run: npm ci
 
       - name: Build Next.js & Electron
@@ -36,7 +54,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: AwesomeChartV3-Windows
+          name: awesomeTradingAgent-Windows
           path: |
             frontend/dist_electron/*.exe
             frontend/dist_electron/*.zip

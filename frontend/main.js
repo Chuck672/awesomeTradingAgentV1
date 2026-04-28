@@ -1,11 +1,45 @@
 const { app, BrowserWindow, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 
 // IMPORTANT: Must be called before app is ready
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { secure: true, standard: true, supportFetchAPI: true, bypassCSP: true } }
 ]);
+
+let backendProcess = null;
+
+function startBackend() {
+  const isDev = !app.isPackaged;
+  let backendPath;
+  let args = [];
+  
+  if (isDev) {
+    backendPath = 'python';
+    args = [path.join(__dirname, '..', 'run_backend.py')];
+  } else {
+    backendPath = path.join(process.resourcesPath, 'extraResources', 'api-server.exe');
+  }
+
+  console.log(`Starting backend: ${backendPath} ${args.join(' ')}`);
+  backendProcess = spawn(backendPath, args, {
+    detached: false,
+    stdio: 'pipe'
+  });
+
+  backendProcess.stdout.on('data', (data) => {
+    console.log(`Backend: ${data}`);
+  });
+
+  backendProcess.stderr.on('data', (data) => {
+    console.error(`Backend Error: ${data}`);
+  });
+
+  backendProcess.on('close', (code) => {
+    console.log(`Backend process exited with code ${code}`);
+  });
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -27,6 +61,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Start the Python backend first
+  startBackend();
+
   // Register custom protocol to bypass file:// absolute path issues
   protocol.registerFileProtocol('app', (request, callback) => {
     let url = request.url.substr(7);    /* all urls start with 'app://' */
@@ -60,8 +97,17 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  if (backendProcess) {
+    backendProcess.kill();
+  }
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+app.on('will-quit', () => {
+  if (backendProcess) {
+    backendProcess.kill();
   }
 });
 

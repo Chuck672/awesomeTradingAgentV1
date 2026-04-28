@@ -37,6 +37,9 @@ def _build_log_config():
     return cfg
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
+    
     from backend.core.arch_check import check_no_services_import_api
 
     check_no_services_import_api()
