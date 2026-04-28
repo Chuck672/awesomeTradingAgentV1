@@ -1,9 +1,11 @@
+import pytest
 import asyncio
 import json
 import uuid
 import websockets
 import httpx
 
+@pytest.mark.asyncio
 async def test_tool_execution_flow():
     session_id = f"test_session_{uuid.uuid4().hex[:8]}"
     # 模拟前端的 WebSocket 路径格式 (需要带有 symbol 和 timeframe)

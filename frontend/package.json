@@ -4,7 +4,7 @@
   "author": "QuantLogicLab",
   "description": "Awesome Chart Application",
   "private": true,
-  "main": "electron/main.js",
+  "main": "main.js",
   "build": {
     "appId": "com.quantlogiclab.awesomechartv3",
     "productName": "AwesomeChartV3",
@@ -41,7 +41,26 @@
     "electron:start": "electron .",
     "electron:build": "npm run export && electron-builder",
     "start": "next start -p 3123",
-    "lint": "eslint"
+    "lint": "eslint",
+    "dist": "npm run build && electron-builder --win",
+    "electron": "wait-on http://localhost:3000 && electron ."
+  },
+  "build": {
+    "appId": "com.awesome.chart",
+    "productName": "AwesomeChartV3",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "main.js",
+      "out/**/*"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "zip"
+      ]
+    }
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
@@ -63,12 +82,14 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^41.2.1",
+    "electron": "^41.3.0",
     "electron-builder": "^26.8.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wait-on": "^9.0.5"
   }
 }
