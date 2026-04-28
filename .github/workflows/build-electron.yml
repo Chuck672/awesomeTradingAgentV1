@@ -9,6 +9,8 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest # 重点：直接使用 GitHub 提供的 Windows 虚拟机，完美解决 wine 问题
+    permissions:
+      contents: write
 
     defaults:
       run:
@@ -39,3 +41,10 @@ jobs:
             frontend/dist_electron/*.exe
             frontend/dist_electron/*.zip
             frontend/dist_electron/*-portable.exe
+
+      - name: Publish Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            frontend/dist_electron/*.exe
+            frontend/dist_electron/*.zip
