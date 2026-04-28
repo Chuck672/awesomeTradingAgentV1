@@ -1,3 +1,4 @@
+import { getBaseUrl } from "@/lib/api";
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -66,7 +67,7 @@ export function BacktestPanel(props: {
 
   // 拉取策略列表
   React.useEffect(() => {
-    fetch("/api/strategies")
+    fetch(`${getBaseUrl()}/api/strategies")
       .then((r) => r.json())
       .then((d) => {
         if (d?.ok && Array.isArray(d.strategies)) setStrategies(d.strategies);
@@ -119,7 +120,7 @@ export function BacktestPanel(props: {
         }
       }
 
-      const r = await fetch("/api/research/strategy-backtest/run", {
+      const r = await fetch(`${getBaseUrl()}/api/research/strategy-backtest/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -139,7 +140,7 @@ export function BacktestPanel(props: {
       const jobId = data.job_id;
 
       for (let i = 0; i < 240; i++) {
-        const s = await fetch(`/api/research/strategy-backtest/status/${jobId}`);
+        const s = await fetch(`${getBaseUrl()}/api/research/strategy-backtest/status/${jobId}`);
         const js = await s.json();
         const j = js?.job;
         setJob(j);
@@ -148,11 +149,11 @@ export function BacktestPanel(props: {
       }
 
       // done => 拉 report.json 用于可视化（equity/trades）
-      const st = await fetch(`/api/research/strategy-backtest/status/${jobId}`);
+      const st = await fetch(`${getBaseUrl()}/api/research/strategy-backtest/status/${jobId}`);
       const stJson = await st.json();
       const j = stJson?.job;
       if (j?.status === "done") {
-        const rep = await fetch(`/api/research/strategy-backtest/download/${jobId}?file=json`).then((x) => x.json());
+        const rep = await fetch(`${getBaseUrl()}/api/research/strategy-backtest/download/${jobId}?file=json`).then((x) => x.json());
         setReport(rep);
 
         // 设置图表 markers（仅在当前图表上）

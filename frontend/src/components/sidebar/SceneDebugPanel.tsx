@@ -1,3 +1,4 @@
+import { getBaseUrl } from "@/lib/api";
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -31,7 +32,7 @@ export function SceneDebugPanel(props: { symbol?: string; timeframe?: string; fo
     setLoading(true);
     setErr(null);
     try {
-      const res = await fetch(`/api/scene/latest?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`);
+      const res = await fetch(`${getBaseUrl()}/api/scene/latest?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`);
       if (!res.ok) {
         setErr(`Scene API 不可用（HTTP ${res.status}）。请先把 ChartScene 后端集成到 awesomeChart backend。`);
         setScene(null);

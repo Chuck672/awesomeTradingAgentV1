@@ -1,3 +1,4 @@
+import { getBaseUrl } from "@/lib/api";
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -21,7 +22,7 @@ export function OptimizePanel(props: { symbol?: string; timeframe?: string }) {
   const sym = symbol || "XAUUSDz";
 
   React.useEffect(() => {
-    fetch("/api/strategies")
+    fetch(`${getBaseUrl()}/api/strategies")
       .then((r) => r.json())
       .then((d) => {
         if (d?.ok && Array.isArray(d.strategies)) setStrategies(d.strategies);
@@ -40,7 +41,7 @@ export function OptimizePanel(props: { symbol?: string; timeframe?: string }) {
     setRunning(true);
     setJob(null);
     try {
-      const r = await fetch("/api/optimize/run", {
+      const r = await fetch(`${getBaseUrl()}/api/optimize/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -58,7 +59,7 @@ export function OptimizePanel(props: { symbol?: string; timeframe?: string }) {
       const jobId = data.job_id;
 
       for (let i = 0; i < 600; i++) {
-        const s = await fetch(`/api/optimize/status/${jobId}`);
+        const s = await fetch(`${getBaseUrl()}/api/optimize/status/${jobId}`);
         const js = await s.json();
         const j = js?.job;
         setJob(j);

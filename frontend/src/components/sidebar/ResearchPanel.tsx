@@ -1,3 +1,4 @@
+import { getBaseUrl } from "@/lib/api";
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -39,7 +40,7 @@ export function ResearchPanel(props: {
     setJob(null);
     setReport(null);
     try {
-      const r = await fetch("/api/research/event-study/run", {
+      const r = await fetch(`${getBaseUrl()}/api/research/event-study/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -64,7 +65,7 @@ export function ResearchPanel(props: {
 
       // poll
       for (let i = 0; i < 240; i++) {
-        const s = await fetch(`/api/research/event-study/status/${jobId}`);
+        const s = await fetch(`${getBaseUrl()}/api/research/event-study/status/${jobId}`);
         const js = await s.json();
         const j = js?.job;
         setJob(j);
@@ -73,11 +74,11 @@ export function ResearchPanel(props: {
       }
 
       // done => 拉 report.json 用于样本列表
-      const st = await fetch(`/api/research/event-study/status/${jobId}`);
+      const st = await fetch(`${getBaseUrl()}/api/research/event-study/status/${jobId}`);
       const stJson = await st.json();
       const j = stJson?.job;
       if (j?.status === "done") {
-        const rep = await fetch(`/api/research/event-study/download/${jobId}?format=json`).then((x) => x.json());
+        const rep = await fetch(`${getBaseUrl()}/api/research/event-study/download/${jobId}?format=json`).then((x) => x.json());
         setReport(rep);
       }
     } catch (e: any) {

@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Settings, Play, Send, X, Plug, Trash2, Square, Camera } from "lucide-react";
-import { getBaseUrl } from "@/lib/api";
+import { getBaseUrl, getWsUrl } from "@/lib/api";
 
 type AgentConfig = {
   base_url: string;
@@ -110,14 +110,8 @@ export function AgentAdvisorPanel(props: {
   }, []);
 
   const wsUrl = useMemo(() => {
-    if (typeof window !== "undefined") {
-      const host = window.location.hostname;
-      const port = window.location.port;
-      if (port && window.location.protocol !== "file:") {
-        const backendHost = (host === "0.0.0.0" || host === "localhost") ? "127.0.0.1" : host;
-        return `ws://${backendHost}:8123/api/ws/AGENT/SYSTEM`;
-      }
-    }
+    const base = getWsUrl();
+    if (base) return `${base}/api/ws/AGENT/SYSTEM`;
     return "ws://127.0.0.1:8123/api/ws/AGENT/SYSTEM";
   }, []);
 
