@@ -38,8 +38,15 @@ def _build_log_config():
 
 if __name__ == "__main__":
     import multiprocessing
+    import asyncio
+    import sys
+    
     multiprocessing.freeze_support()
     
+    # Fix ZMQ asyncio issue on Windows
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        
     from backend.core.arch_check import check_no_services_import_api
 
     check_no_services_import_api()
