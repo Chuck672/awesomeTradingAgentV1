@@ -216,8 +216,11 @@ class AlertDualAgentWorkflow:
 
                 t_tg = time.perf_counter()
                 try:
-                    await asyncio.to_thread(
-                        send_telegram_message, bot_token=token, chat_id=chat_id, text=final_report
+                    # Fire-and-forget: do not block the UI rendering
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            send_telegram_message, bot_token=token, chat_id=chat_id, text=final_report
+                        )
                     )
                 except Exception as e:
                     logger.exception(
@@ -239,58 +242,27 @@ class AlertDualAgentWorkflow:
             telegram_ms,
         )
 
-        executor_prompt = (
-            "你是高精度的绘图执行引擎 (Executor)。你的唯一使命是调用工具来在图表上画出交易关键位。\n"
-            "严格约束：\n"
-            "1) 你必须先调用 draw_clear_ai 清除 AI 绘图，再调用 draw_objects 绘制。\n"
-            "2) 只画 Entry/SL/TP 的水平线（hline），不做其它图表控制。\n"
-            "3) 颜色强制规范：Entry '#3b82f6'（蓝），TP '#22c55e'（绿），SL '#ef4444'（红）。\n"
-            "4) 必须真实触发工具调用，最后只输出 'FINISHED'。\n"
-            "输入将包含 Analyzer 的 JSON 计划。你必须从 JSON 中读取 entry_price/stop_loss/take_profit。\n"
-            "如果 entry_type == 'market'，entry_price 仍然是你要绘制的 Entry 参考价（不要自行改写）。\n"
-        )
-
-        executor_llm = get_llm("executor", configs)
-        executor_agent = create_react_agent(
-            executor_llm,
-            tools=[draw_clear_ai, draw_objects, draw_remove_object],
-            prompt=executor_prompt,
-        )
-
+        # 废除 Executor LLM，改用纯代码映射
         await agent_comm.broadcast_status(session_id, "executor", "thinking", "Drawing on chart...")
         t2 = time.perf_counter()
-        result = await asyncio.to_thread(
-            executor_agent.invoke,
-            {
-                "messages": [
-                    HumanMessage(
-                        content=(
-                            f"[System Context: User is viewing {symbol} on {timeframe} timeframe]\n\n"
-                            "根据下面 Analyzer 的 JSON 计划在图表上绘制水平线（Entry/SL/TP）。\n"
-                            "优先使用 JSON；如果 JSON 缺失或解析失败，才退回读取原始文本。\n\n"
-                            "Analyzer JSON:\n```json\n"
-                            + (analyzer_plan_json or "")
-                            + "\n```\n\n"
-                            "Analyzer Raw:\n"
-                            + analyzer_text
-                        )
-                    )
-                ]
-            },
-        )
-        executor_ms = int((time.perf_counter() - t2) * 1000)
+        
+        ui_actions: list[dict] = [{"action": "draw_clear_ai"}]
+        if isinstance(analyzer_plan, dict):
+            objects = []
+            ep = _safe_float(analyzer_plan.get("entry_price"))
+            sl = _safe_float(analyzer_plan.get("stop_loss"))
+            tp = _safe_float(analyzer_plan.get("take_profit"))
+            if ep > 0:
+                objects.append({"type": "hline", "price": ep, "color": "#3b82f6", "text": "Entry"})
+            if sl > 0:
+                objects.append({"type": "hline", "price": sl, "color": "#ef4444", "text": "SL"})
+            if tp > 0:
+                objects.append({"type": "hline", "price": tp, "color": "#22c55e", "text": "TP"})
+            
+            if objects:
+                ui_actions.append({"action": "draw_objects", "objects": objects})
 
-        ui_actions: list[dict] = []
-        for m in result.get("messages", []):
-            if getattr(m, "tool_calls", None):
-                for tc in m.tool_calls:
-                    if tc["name"].startswith(("draw_", "execute_ui_action")):
-                        args = tc.get("args", {}) or {}
-                        if "type" in args and "action" not in args:
-                            args["action"] = args["type"]
-                        if tc["name"] != "execute_ui_action":
-                            args["action"] = tc["name"]
-                        ui_actions.append(args)
+        executor_ms = int((time.perf_counter() - t2) * 1000)
 
         for action in ui_actions:
             await agent_comm.broadcast_tool_execution(

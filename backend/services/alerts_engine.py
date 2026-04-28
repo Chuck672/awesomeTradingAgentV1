@@ -53,14 +53,14 @@ def _get_active_symbols() -> List[str]:
     # If ingestion_service isn't fully tracking it this way, we can also query the DB
     return ["EURUSD"] # Fallback or dynamic fetch
 
-def eval_raja_sr_touch(rule: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
+def eval_raja_sr_touch(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[str]:
     det = {"feature_id": "raja_sr_touch", "timeframe": rule.get("timeframe"), "params": {"limit": 400, "max_zones": 5}}
     rule2 = dict(rule)
     rule2["type"] = "detector_trigger"
     rule2["trigger_detectors"] = [det]
-    return eval_detector_trigger(rule2, state)
+    return eval_detector_trigger(rule2, state, global_cache_bars, global_cache_struct)
 
-def eval_msb_zigzag_break(rule: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
+def eval_msb_zigzag_break(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[str]:
     det = {
         "feature_id": "msb_zigzag_break",
         "timeframe": rule.get("timeframe"),
@@ -69,21 +69,21 @@ def eval_msb_zigzag_break(rule: Dict[str, Any], state: Dict[str, Any]) -> Option
     rule2 = dict(rule)
     rule2["type"] = "detector_trigger"
     rule2["trigger_detectors"] = [det]
-    return eval_detector_trigger(rule2, state)
+    return eval_detector_trigger(rule2, state, global_cache_bars, global_cache_struct)
 
-def eval_trend_exhaustion(rule: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
+def eval_trend_exhaustion(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[str]:
     det = {"feature_id": "trend_exhaustion", "timeframe": rule.get("timeframe"), "params": {"limit": 400}}
     rule2 = dict(rule)
     rule2["type"] = "detector_trigger"
     rule2["trigger_detectors"] = [det]
-    return eval_detector_trigger(rule2, state)
+    return eval_detector_trigger(rule2, state, global_cache_bars, global_cache_struct)
 
 def _mk_sig(parts: List[Any]) -> str:
     raw = "|".join("" if p is None else str(p) for p in parts)
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def eval_detector_trigger(rule: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
+def eval_detector_trigger(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[str]:
     symbol = str(rule.get("symbol") or "").strip()
     default_tf = str(rule.get("timeframe") or "").strip()
     if not symbol or not default_tf:
@@ -134,20 +134,18 @@ def eval_detector_trigger(rule: Dict[str, Any], state: Dict[str, Any]) -> Option
     best_time = -1
     best_score = -1.0
 
-    cache_bars: Dict[str, List[Dict[str, Any]]] = {}
-    cache_struct: Dict[str, Dict[str, Any]] = {}
-
     def _get_bars(tf: str, limit: int) -> List[Dict[str, Any]]:
-        key = f"{tf}:{limit}"
-        if key in cache_bars:
-            return cache_bars[key]
+        key = f"{symbol}:{tf}:{limit}"
+        if key in global_cache_bars:
+            return global_cache_bars[key]
         bars = historical_service.get_history(symbol, tf, before_time=0, limit=int(limit))
-        cache_bars[key] = bars if isinstance(bars, list) else []
-        return cache_bars[key]
+        global_cache_bars[key] = bars if isinstance(bars, list) else []
+        return global_cache_bars[key]
 
     def _get_structures(tf: str, bars: List[Dict[str, Any]]) -> Dict[str, Any]:
-        if tf in cache_struct:
-            return cache_struct[tf]
+        key = f"{symbol}:{tf}"
+        if key in global_cache_struct:
+            return global_cache_struct[key]
         h4 = historical_service.get_history(symbol=symbol, timeframe="H4", limit=200)
         level_gen = {
             "sources": [
@@ -159,8 +157,8 @@ def eval_detector_trigger(rule: Dict[str, Any], state: Dict[str, Any]) -> Option
         rep = tool_structure_level_generator({"bars_by_tf": {tf: bars, "H4": h4}, "primary_timeframe": tf, "level_generator": level_gen})
         levels = rep.get("levels") if isinstance(rep, dict) and isinstance(rep.get("levels"), list) else []
         zones = rep.get("zones") if isinstance(rep, dict) and isinstance(rep.get("zones"), list) else []
-        cache_struct[tf] = {"levels": levels, "zones": zones}
-        return cache_struct[tf]
+        global_cache_struct[key] = {"levels": levels, "zones": zones}
+        return global_cache_struct[key]
 
     for d in detectors:
         if not isinstance(d, dict):
@@ -495,6 +493,10 @@ def eval_once() -> None:
     if now_ts - int(_last_scan_log_ts or 0) >= 60:
         _last_scan_log_ts = now_ts
         logger.info("alerts_scan enabled=%s", len(alerts))
+        
+    global_cache_bars: Dict[str, List[Dict[str, Any]]] = {}
+    global_cache_struct: Dict[str, Dict[str, Any]] = {}
+    
     for a in alerts:
         aid = int(a["id"])
         rule = a.get("rule") or {}
@@ -508,13 +510,13 @@ def eval_once() -> None:
         
         # New AI Agent Event Triggers
         elif typ == "raja_sr_touch":
-            msg = eval_raja_sr_touch(rule, state)
+            msg = eval_raja_sr_touch(rule, state, global_cache_bars, global_cache_struct)
         elif typ == "msb_zigzag_break":
-            msg = eval_msb_zigzag_break(rule, state)
+            msg = eval_msb_zigzag_break(rule, state, global_cache_bars, global_cache_struct)
         elif typ == "trend_exhaustion":
-            msg = eval_trend_exhaustion(rule, state)
+            msg = eval_trend_exhaustion(rule, state, global_cache_bars, global_cache_struct)
         elif typ == "detector_trigger":
-            msg = eval_detector_trigger(rule, state)
+            msg = eval_detector_trigger(rule, state, global_cache_bars, global_cache_struct)
         else:
             continue
 
