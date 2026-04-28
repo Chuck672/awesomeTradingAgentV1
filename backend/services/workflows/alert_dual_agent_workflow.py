@@ -236,7 +236,99 @@ class AlertDualAgentWorkflow:
             plan["risk_reward_ratio"] = rr_f
             return plan
 
+        def _normalize_trade_levels(plan: dict) -> dict:
+            if not isinstance(plan, dict):
+                return plan
+            sig = str(plan.get("signal") or "").lower()
+            if sig not in ("buy", "sell"):
+                return plan
+
+            ep = plan.get("entry_price")
+            sl = plan.get("stop_loss")
+            tp = plan.get("take_profit")
+
+            try:
+                ep_f = float(ep) if ep is not None else None
+                sl_f = float(sl) if sl is not None else None
+                tp_f = float(tp) if tp is not None else None
+            except Exception:
+                return plan
+
+            if ep_f is None or not (ep_f == ep_f):
+                return plan
+
+            rr = plan.get("risk_reward_ratio")
+            try:
+                rr_f = float(rr) if rr is not None else None
+            except Exception:
+                rr_f = None
+            if rr_f is not None and (not (rr_f == rr_f) or rr_f <= 0):
+                rr_f = None
+
+            def _recompute_rr(_ep: float, _sl: float, _tp: float) -> Optional[float]:
+                risk = abs(_ep - _sl)
+                reward = abs(_ep - _tp)
+                if risk <= 0 or reward <= 0:
+                    return None
+                return reward / risk
+
+            def _fix_buy() -> Tuple[Optional[float], Optional[float], Optional[float]]:
+                _sl = sl_f
+                _tp = tp_f
+                if _sl is not None and _sl >= ep_f and _tp is not None and _tp > ep_f:
+                    if rr_f is None:
+                        _sl = ep_f - abs(_tp - ep_f) / 2.0
+                    else:
+                        _sl = ep_f - abs(_tp - ep_f) / rr_f
+                if _tp is not None and _tp <= ep_f and _sl is not None and _sl < ep_f:
+                    risk = abs(ep_f - _sl)
+                    use_rr = rr_f if rr_f is not None else 2.0
+                    _tp = ep_f + risk * use_rr
+                if _sl is not None and _sl >= ep_f and _tp is not None and _tp <= ep_f:
+                    return None, None, None
+                return _sl, _tp, rr_f
+
+            def _fix_sell() -> Tuple[Optional[float], Optional[float], Optional[float]]:
+                _sl = sl_f
+                _tp = tp_f
+                if _sl is not None and _sl > ep_f and _tp is not None and _tp >= ep_f:
+                    risk = abs(ep_f - _sl)
+                    use_rr = rr_f if rr_f is not None else 2.0
+                    _tp = ep_f - risk * use_rr
+                if _tp is not None and _tp < ep_f and _sl is not None and _sl <= ep_f:
+                    reward = abs(ep_f - _tp)
+                    use_rr = rr_f if rr_f is not None else 2.0
+                    _sl = ep_f + reward / use_rr
+                if _sl is not None and _sl <= ep_f and _tp is not None and _tp >= ep_f:
+                    return None, None, None
+                return _sl, _tp, rr_f
+
+            if sig == "buy":
+                sl2, tp2, _ = _fix_buy()
+            else:
+                sl2, tp2, _ = _fix_sell()
+
+            if sl2 is None or tp2 is None:
+                note = str(plan.get("confidence_note") or "")
+                extra = "计划无效：止损/止盈与 signal 方向不一致，已转为 hold。"
+                plan["signal"] = "hold"
+                plan["confidence_note"] = (note + ("；" if note else "") + extra)[:500]
+                plan["entry_type"] = None
+                plan["entry_price"] = None
+                plan["stop_loss"] = None
+                plan["take_profit"] = None
+                plan["risk_reward_ratio"] = None
+                return plan
+
+            plan["stop_loss"] = float(sl2)
+            plan["take_profit"] = float(tp2)
+            rr2 = _recompute_rr(ep_f, float(sl2), float(tp2))
+            if rr2 is not None:
+                plan["risk_reward_ratio"] = float(rr2)
+            return plan
+
         analyzer_plan = _fill_take_profit(analyzer_plan)
+        analyzer_plan = _normalize_trade_levels(analyzer_plan)
         try:
             analyzer_text = json.dumps(analyzer_plan, ensure_ascii=False, indent=2) if analyzer_plan else analyzer_text
         except Exception:
