@@ -1,8 +1,6 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, protocol } = require('electron');
 const path = require('path');
-const serve = require('electron-serve');
-
-const loadURL = serve({ directory: 'out' });
+const fs = require('fs');
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -18,12 +16,26 @@ function createWindow() {
   if (isDev) {
     win.loadURL('http://localhost:3000');
   } else {
-    // Use electron-serve to serve the Next.js export instead of file://
-    loadURL(win);
+    // Next.js static export paths
+    win.loadURL('app://-/index.html');
   }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // Register custom protocol to bypass file:// absolute path issues
+  protocol.interceptFileProtocol('app', (request, callback) => {
+    const url = request.url.substr(7);    /* all urls start with 'app://' */
+    let p = path.normalize(path.join(__dirname, 'out', url));
+    if (!fs.existsSync(p)) {
+      p = path.normalize(path.join(__dirname, 'out', 'index.html'));
+    }
+    callback({ path: p });
+  }, (error) => {
+    if (error) console.error('Failed to register protocol');
+  });
+
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
