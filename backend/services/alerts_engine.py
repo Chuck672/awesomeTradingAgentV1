@@ -78,6 +78,21 @@ def eval_trend_exhaustion(rule: Dict[str, Any], state: Dict[str, Any], global_ca
     rule2["trigger_detectors"] = [det]
     return eval_detector_trigger(rule2, state, global_cache_bars, global_cache_struct)
 
+def eval_rectangle_breakout(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[str]:
+    det = {
+        "feature_id": "rectangle_breakout",
+        "timeframe": rule.get("timeframe"),
+        "params": {
+            "lookback_bars": _safe_int(rule.get("lookback_bars", 220)),
+            "min_touches_per_side": _safe_int(rule.get("min_touches_per_side", 2)),
+            "tolerance_atr_mult": float(rule.get("tolerance_atr_mult", 0.25)),
+        },
+    }
+    rule2 = dict(rule)
+    rule2["type"] = "detector_trigger"
+    rule2["trigger_detectors"] = [det]
+    return eval_detector_trigger(rule2, state, global_cache_bars, global_cache_struct)
+
 def _mk_sig(parts: List[Any]) -> str:
     raw = "|".join("" if p is None else str(p) for p in parts)
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
@@ -303,6 +318,39 @@ def eval_detector_trigger(rule: Dict[str, Any], state: Dict[str, Any], global_ca
                     it2 = dict(it)
                     it2["timeframe"] = tf
                     events.append(it2)
+        elif fid == "rectangle_breakout":
+            rep = detect_rectangle_ranges(
+                bars,
+                lookback_bars=int(prm.get("lookback_bars", 220)),
+                min_touches_per_side=int(prm.get("min_touches_per_side", 2)),
+                tolerance_atr_mult=float(prm.get("tolerance_atr_mult", 0.25)),
+                min_containment=float(prm.get("min_containment", 0.80)),
+                max_height_atr=float(prm.get("max_height_atr", 8.0)),
+                max_drift_atr=float(prm.get("max_drift_atr", 3.0)),
+                max_efficiency=float(prm.get("max_efficiency", 0.45)),
+                emit="distinct",
+                max_results=int(prm.get("max_results", 50)),
+                distinct_no_overlap=bool(prm.get("distinct_no_overlap", True)),
+                dedup_iou=float(prm.get("dedup_iou", 0.55)),
+            )
+            items = rep.get("items") if isinstance(rep, dict) else None
+            for it in items if isinstance(items, list) else []:
+                if not isinstance(it, dict):
+                    continue
+                bo = it.get("breakout")
+                if not isinstance(bo, dict):
+                    continue
+                d = bo.get("direction")
+                if d not in ("up", "down"):
+                    continue
+                it2 = dict(it)
+                it2["type"] = "rectangle_breakout"
+                it2["id"] = it.get("evidence_id") or "rectangle_breakout"
+                it2["direction"] = "Bullish" if d == "up" else "Bearish"
+                it2["score"] = float(it.get("score") or 75.0)
+                it2["confirm_time"] = bo.get("confirm_time")
+                it2["timeframe"] = tf
+                events.append(it2)
 
         elif fid == "bos_choch":
             got = detect_bos_choch(
@@ -515,6 +563,8 @@ def eval_once() -> None:
             msg = eval_msb_zigzag_break(rule, state, global_cache_bars, global_cache_struct)
         elif typ == "trend_exhaustion":
             msg = eval_trend_exhaustion(rule, state, global_cache_bars, global_cache_struct)
+        elif typ == "rectangle_breakout":
+            msg = eval_rectangle_breakout(rule, state, global_cache_bars, global_cache_struct)
         elif typ == "detector_trigger":
             msg = eval_detector_trigger(rule, state, global_cache_bars, global_cache_struct)
         else:
@@ -526,7 +576,7 @@ def eval_once() -> None:
             logger.info("alert_event_saved alert_id=%s", aid)
             
             # If it's an AI Agent Trigger, spin up a background agent workflow!
-            if typ in ["raja_sr_touch", "msb_zigzag_break", "trend_exhaustion", "detector_trigger"]:
+            if typ in ["raja_sr_touch", "msb_zigzag_break", "trend_exhaustion", "rectangle_breakout", "detector_trigger"]:
                 configs = rule.get("agent_configs", {})
                 initial_prompt = configs.get("initial_prompt", f"Auto-triggered event: {msg}. Please analyze context and execute.")
                 session_id = f"evt_{aid}_{uuid.uuid4().hex[:8]}"

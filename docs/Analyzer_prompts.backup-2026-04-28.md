@@ -70,18 +70,3 @@
   "trade_horizon": "scalp|intraday|swing"
 }
 请现在开始分析输入，并只输出符合 constraints 的 JSON。
-
-【运行时输出映射规则（必须遵守）】
-- 最终输出会被系统限制为固定字段集合（以 runtime schema 为准）。如果某些字段在 required_fields 中存在，但你无法输出（运行时 schema 不包含），你必须把这些信息迁移到仍可输出的字段中，优先写入 invalidation_condition（作为详细分析报告）。
-- 若 reasoning/decision_delta/position_state 等字段无法直接输出：请将“多周期结构判断 + 关键位证据 + 动量/成交量/波动 + 相对上一决策变化点 + 当前仓位建议”用分段文本完整写入 invalidation_condition。
-- evidence_refs 必须用于构建可核验的证据链：每条必须指向输入 JSON 中真实存在的 evidence_id 或可定位对象（例如 active_zones/recent_structure_breaks/pattern_events 的 evidence），并在 invalidation_condition 中解释每条证据如何影响结论。
-
-【证据链输出格式（写入 invalidation_condition）】
-invalidiation_condition 必须使用以下分段结构（用换行分段）：
-1) Trigger 解读：本次触发属于什么触发器（trigger_type/trigger_text），触发意味着什么市场状态变化。
-2) 结构证据（至少2条）：引用 H1/M15 的 Market_Structure、Structure_High/Low、active_zones、recent_structure_breaks、bos_choch 等，写出关键价格/方向/时间。
-3) 指标证据（至少2条）：引用 RSI_14/MACD/ATR_14、volume_activity、vol_regime、session_vp/VolumeProfile（若存在），写出数值或状态并解释作用。
-4) 形态/行为证据（至少1条）：引用 candlestick/rectangle_ranges 或 pattern_events（false_breakout/liquidity_sweep/close_outside/breakout_retest_hold），写出证据字段（bar_time/top/bottom/level 等）。
-5) 推理链条：用“因为…所以…”将(2)(3)(4)串起来，得出 signal 与 confidence 的理由。
-6) 执行计划：说明入场方式（market/limit）、触发确认条件、止损依据、TP1/TP2 依据（若无法给出则说明原因）。
-7) 失效条件：必须可验证（绑定具体结构位/zone边界/突破价），并说明触发后应如何降级/退出。

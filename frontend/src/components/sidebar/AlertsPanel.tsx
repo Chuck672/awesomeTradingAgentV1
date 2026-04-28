@@ -93,19 +93,20 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   
   const [symbol, setSymbol] = useState(props.symbol || "XAUUSD");
   const [timeframe, setTimeframe] = useState(props.timeframe || "M15");
-  const [alertType, setAlertType] = useState<"raja_sr_touch" | "msb_zigzag_break" | "trend_exhaustion" | "detector_trigger">("detector_trigger");
+  const [alertType, setAlertType] = useState<"raja_sr_touch" | "msb_zigzag_break" | "trend_exhaustion" | "rectangle_breakout">("raja_sr_touch");
   
   // Specific settings
   const [cooldown, setCooldown] = useState(30);
   const [detectBos, setDetectBos] = useState(true);
   const [detectChoch, setDetectChoch] = useState(true);
+  const [rectLookbackBars, setRectLookbackBars] = useState(220);
+  const [rectMinTouchesPerSide, setRectMinTouchesPerSide] = useState(2);
+  const [rectToleranceAtrMult, setRectToleranceAtrMult] = useState(0.25);
   const [initialPrompt, setInitialPrompt] = useState("");
   const [featureCatalog, setFeatureCatalog] = useState<any>(null);
   const [contextEnabled, setContextEnabled] = useState<Record<string, boolean>>({});
   const [contextParams, setContextParams] = useState<Record<string, any>>({});
-  const [triggerEnabled, setTriggerEnabled] = useState<Record<string, boolean>>({});
-  const [triggerParams, setTriggerParams] = useState<Record<string, any>>({});
-  const [triggerTimeframe, setTriggerTimeframe] = useState<string>(() => (props.timeframe || "M15"));
+  const [contextBundles, setContextBundles] = useState<Record<string, boolean>>({});
 
   const [enableTg, setEnableTg] = useState(false);
   const [showTgSettings, setShowTgSettings] = useState(false);
@@ -128,7 +129,6 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   }, []);
   useEffect(() => setSymbol(props.symbol || "XAUUSD"), [props.symbol]);
   useEffect(() => setTimeframe(props.timeframe || "M15"), [props.timeframe]);
-  useEffect(() => setTriggerTimeframe(props.timeframe || "M15"), [props.timeframe]);
   useEffect(() => {
     (async () => {
       try {
@@ -148,6 +148,33 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
     return Array.isArray(items) ? items : [];
   }, [featureCatalog]);
 
+  const contextBundleDefs = useMemo(() => {
+    return [
+      { id: "ta_sessionvp_rajasr_msb", label: "TA + SessionVP + RajaSR + MSB", features: ["bos_choch", "close_outside_level_zone"] },
+      { id: "ta_vp_candle", label: "TA + VP + Candlestick Patterns", features: ["candlestick"] },
+      { id: "ta_vp_rectangle", label: "TA + VP + Rectangle Range", features: ["rectangle_range"] },
+      { id: "smc_pack", label: "SMC Pack (BOS/CHOCH + Sweep + False Breakout + Retest)", features: ["bos_choch", "liquidity_sweep", "false_breakout", "close_outside_level_zone", "breakout_retest_hold"] },
+    ];
+  }, []);
+
+  const enableContextFeature = (fid: string) => {
+    setContextEnabled(prev => ({ ...(prev || {}), [fid]: true }));
+    const it = patternCatalogItems.find((x: any) => String(x?.id || "") === fid);
+    const params = Array.isArray(it?.params) ? it.params : [];
+    if (!params.length) return;
+    setContextParams(prev => {
+      const next = { ...(prev || {}) };
+      const cur = { ...(next[fid] || {}) };
+      for (const p of params) {
+        const n = String(p?.name || "");
+        if (!n) continue;
+        if (cur[n] === undefined) cur[n] = p?.default;
+      }
+      next[fid] = cur;
+      return next;
+    });
+  };
+
   const updateContextParam = (featureId: string, name: string, value: any) => {
     setContextParams(prev => {
       const next = { ...(prev || {}) };
@@ -156,52 +183,6 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
       next[featureId] = cur;
       return next;
     });
-  };
-
-  const updateTriggerParam = (featureId: string, name: string, value: any) => {
-    setTriggerParams(prev => {
-      const next = { ...(prev || {}) };
-      const cur = { ...(next[featureId] || {}) };
-      cur[name] = value;
-      next[featureId] = cur;
-      return next;
-    });
-  };
-
-  const applyTriggerTemplate = (tpl: "raja_sr_touch" | "msb_zigzag_break" | "trend_exhaustion") => {
-    setAlertType("detector_trigger");
-    setTriggerEnabled({ [tpl]: true });
-    if (tpl === "msb_zigzag_break") {
-      setTriggerParams({ [tpl]: { limit: 400, detect_bos: true, detect_choch: true } });
-    } else if (tpl === "raja_sr_touch") {
-      setTriggerParams({ [tpl]: { limit: 400, max_zones: 5 } });
-    } else {
-      setTriggerParams({ [tpl]: { limit: 400 } });
-    }
-  };
-
-  const copyTriggerToContext = () => {
-    const enabledIds = Object.entries(triggerEnabled || {}).filter(([, v]) => !!v).map(([k]) => k);
-    const nextEnabled: Record<string, boolean> = {};
-    const nextParams: Record<string, any> = {};
-    for (const k of enabledIds) {
-      nextEnabled[k] = true;
-      nextParams[k] = triggerParams?.[k] || {};
-    }
-    setContextEnabled(nextEnabled);
-    setContextParams(nextParams);
-  };
-
-  const copyContextToTrigger = () => {
-    const enabledIds = Object.entries(contextEnabled || {}).filter(([, v]) => !!v).map(([k]) => k);
-    const nextEnabled: Record<string, boolean> = {};
-    const nextParams: Record<string, any> = {};
-    for (const k of enabledIds) {
-      nextEnabled[k] = true;
-      nextParams[k] = contextParams?.[k] || {};
-    }
-    setTriggerEnabled(nextEnabled);
-    setTriggerParams(nextParams);
   };
 
   const unreadReportCount = useMemo(() => {
@@ -339,11 +320,12 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
         name = `MSB Break ${symbol} ${timeframe}`;
       } else if (alertType === "trend_exhaustion") {
         name = `Trend Exhaustion ${symbol} ${timeframe}`;
-      } else if (alertType === "detector_trigger") {
-        const enabledIds = Object.entries(triggerEnabled || {}).filter(([, v]) => !!v).map(([k]) => k);
-        const dets = enabledIds.map((fid) => ({ feature_id: fid, timeframe: triggerTimeframe || timeframe, params: triggerParams?.[fid] || {} }));
-        rule.trigger_detectors = dets;
-        name = `Detector Trigger ${symbol} ${triggerTimeframe || timeframe}`;
+      } else if (alertType === "rectangle_breakout") {
+        rule.lookback_bars = rectLookbackBars;
+        rule.min_touches_per_side = rectMinTouchesPerSide;
+        rule.tolerance_atr_mult = rectToleranceAtrMult;
+        rule.cooldown_minutes = cooldown;
+        name = `Rectangle Breakout ${symbol} ${timeframe}`;
       }
 
       const r = await fetch(`${getBaseUrl()}/api/alerts/create`, {
@@ -457,7 +439,7 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
               <option value="raja_sr_touch">RajaSR Zone Touch</option>
               <option value="msb_zigzag_break">MSB / ChoCh Structure Break</option>
               <option value="trend_exhaustion">Trend Exhaustion (Triangle)</option>
-              <option value="detector_trigger">Detector Trigger (Generic)</option>
+              <option value="rectangle_breakout">Rectangle Pattern Breakout</option>
             </select>
 
             <div className="grid grid-cols-2 gap-2">
@@ -491,157 +473,20 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
                 </label>
               </div>
             )}
-
-            {alertType === "detector_trigger" && (
-              <div className="bg-black/20 p-2 rounded border border-white/5">
-                <div className="text-[11px] text-gray-400 font-medium mb-2">Trigger Detectors</div>
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <select
-                    className="h-7 bg-[#0b0f14] border border-white/10 rounded px-2 text-[11px] text-white"
-                    value={triggerTimeframe}
-                    onChange={(e) => setTriggerTimeframe(e.target.value)}
-                  >
-                    <option value="M1">M1</option>
-                    <option value="M5">M5</option>
-                    <option value="M15">M15</option>
-                    <option value="M30">M30</option>
-                    <option value="H1">H1</option>
-                    <option value="H4">H4</option>
-                    <option value="D1">D1</option>
-                  </select>
-                  <div className="text-[10px] text-gray-500 flex items-center">用于 trigger 扫描的 TF</div>
+            {alertType === "rectangle_breakout" && (
+              <div className="grid grid-cols-3 gap-2 text-xs text-gray-300 bg-black/20 p-2 rounded">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] text-gray-500">lookback_bars</span>
+                  <input className="h-7 bg-black/30 border border-white/10 rounded px-2 text-[11px] text-white" type="number" value={rectLookbackBars} onChange={(e) => setRectLookbackBars(Number(e.target.value))} />
                 </div>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  <button type="button" className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300" onClick={() => applyTriggerTemplate("raja_sr_touch")}>
-                    Template: RajaSR Touch
-                  </button>
-                  <button type="button" className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300" onClick={() => applyTriggerTemplate("msb_zigzag_break")}>
-                    Template: MSB Break
-                  </button>
-                  <button type="button" className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300" onClick={() => applyTriggerTemplate("trend_exhaustion")}>
-                    Template: Trend Exhaustion
-                  </button>
-                  <button type="button" className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300" onClick={copyTriggerToContext}>
-                    Copy Trigger → Context
-                  </button>
-                  <button type="button" className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300" onClick={copyContextToTrigger}>
-                    Copy Context → Trigger
-                  </button>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] text-gray-500">min_touches</span>
+                  <input className="h-7 bg-black/30 border border-white/10 rounded px-2 text-[11px] text-white" type="number" value={rectMinTouchesPerSide} onChange={(e) => setRectMinTouchesPerSide(Number(e.target.value))} />
                 </div>
-                {!patternCatalogItems.length ? (
-                  <div className="text-[10px] text-gray-500">Feature catalog not loaded.</div>
-                ) : (
-                  <div className="space-y-2">
-                    {patternCatalogItems.map((it: any) => {
-                      const fid = String(it?.id || "");
-                      if (!fid) return null;
-                      const enabled = !!triggerEnabled[fid];
-                      const params = Array.isArray(it?.params) ? it.params : [];
-                      return (
-                        <div key={fid} className="border border-white/10 rounded p-2 bg-black/10">
-                          <label className="flex items-center gap-2 text-[11px] text-gray-200 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={enabled}
-                              onChange={(e) => {
-                                const v = e.target.checked;
-                                setTriggerEnabled(prev => ({ ...(prev || {}), [fid]: v }));
-                                if (v && params.length) {
-                                  setTriggerParams(prev => {
-                                    const next = { ...(prev || {}) };
-                                    const cur = { ...(next[fid] || {}) };
-                                    for (const p of params) {
-                                      const n = String(p?.name || "");
-                                      if (!n) continue;
-                                      if (cur[n] === undefined) cur[n] = p?.default;
-                                    }
-                                    next[fid] = cur;
-                                    return next;
-                                  });
-                                }
-                              }}
-                            />
-                            <span>{String(it?.label || fid)}</span>
-                          </label>
-                          {enabled && params.length > 0 && (
-                            <div className="mt-2 grid grid-cols-2 gap-2">
-                              {params.map((p: any) => {
-                                const pn = String(p?.name || "");
-                                if (!pn) return null;
-                                const pt = String(p?.type || "string");
-                                const val = triggerParams?.[fid]?.[pn];
-                                const enumVals = Array.isArray(p?.enum) ? p.enum : null;
-                                if (pt === "boolean") {
-                                  return (
-                                    <label key={pn} className="flex items-center gap-2 text-[10px] text-gray-300">
-                                      <input type="checkbox" checked={!!val} onChange={(e) => updateTriggerParam(fid, pn, e.target.checked)} />
-                                      <span>{pn}</span>
-                                    </label>
-                                  );
-                                }
-                                if (pt === "string" && enumVals) {
-                                  return (
-                                    <div key={pn} className="flex flex-col gap-1">
-                                      <span className="text-[10px] text-gray-500">{pn}</span>
-                                      <select
-                                        className="h-7 bg-[#0b0f14] border border-white/10 rounded px-2 text-[11px] text-white"
-                                        value={String(val ?? p?.default ?? "")}
-                                        onChange={(e) => updateTriggerParam(fid, pn, e.target.value)}
-                                      >
-                                        {enumVals.map((x: any) => (
-                                          <option key={String(x)} value={String(x)}>
-                                            {String(x)}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                  );
-                                }
-                                if (pt === "array") {
-                                  return (
-                                    <div key={pn} className="flex flex-col gap-1">
-                                      <span className="text-[10px] text-gray-500">{pn}</span>
-                                      <input
-                                        className="h-7 bg-black/30 border border-white/10 rounded px-2 text-[11px] text-white"
-                                        value={Array.isArray(val) ? val.join(",") : String(val ?? "")}
-                                        onChange={(e) => {
-                                          const raw = e.target.value;
-                                          const parts = raw
-                                            .split(",")
-                                            .map(s => s.trim())
-                                            .filter(Boolean)
-                                            .map(s => {
-                                              const n = Number(s);
-                                              return Number.isFinite(n) ? n : s;
-                                            });
-                                          updateTriggerParam(fid, pn, parts);
-                                        }}
-                                      />
-                                    </div>
-                                  );
-                                }
-                                const isInt = pt === "integer";
-                                const num = Number(val ?? p?.default ?? 0);
-                                return (
-                                  <div key={pn} className="flex flex-col gap-1">
-                                    <span className="text-[10px] text-gray-500">{pn}</span>
-                                    <input
-                                      className="h-7 bg-black/30 border border-white/10 rounded px-2 text-[11px] text-white"
-                                      type="number"
-                                      step={isInt ? 1 : "any"}
-                                      value={Number.isFinite(num) ? num : 0}
-                                      onChange={(e) => updateTriggerParam(fid, pn, isInt ? parseInt(e.target.value || "0", 10) : Number(e.target.value))}
-                                    />
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] text-gray-500">tolerance_atr_mult</span>
+                  <input className="h-7 bg-black/30 border border-white/10 rounded px-2 text-[11px] text-white" type="number" step="any" value={rectToleranceAtrMult} onChange={(e) => setRectToleranceAtrMult(Number(e.target.value))} />
+                </div>
               </div>
             )}
 
@@ -653,6 +498,52 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
                 value={initialPrompt}
                 onChange={(e) => setInitialPrompt(e.target.value)}
               />
+            </div>
+
+            <div className="bg-black/20 p-2 rounded border border-white/5">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[11px] text-gray-400 font-medium">Context Presets (互补组合)</div>
+                <button
+                  className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300"
+                  type="button"
+                  onClick={() => {
+                    setContextBundles({});
+                    setContextEnabled({});
+                    setContextParams({});
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                {contextBundleDefs.map((b) => {
+                  const checked = !!contextBundles[b.id];
+                  return (
+                    <label key={b.id} className="flex items-start gap-2 text-[11px] text-gray-200 cursor-pointer bg-black/10 border border-white/10 rounded p-2">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const v = e.target.checked;
+                          setContextBundles(prev => ({ ...(prev || {}), [b.id]: v }));
+                          if (v) {
+                            for (const fid of b.features) enableContextFeature(fid);
+                          }
+                        }}
+                      />
+                      <div className="flex flex-col gap-1">
+                        <div className="text-gray-100">{b.label}</div>
+                        <div className="text-[10px] text-gray-500">
+                          {b.features.join(", ")}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="text-[10px] text-gray-500 mt-2">
+                TA / SessionVP / active_zones / recent_structure_breaks 等基础上下文会自动随事件构建；这里主要控制额外的 pattern_events 与 patterns 模块。
+              </div>
             </div>
 
             <div className="bg-black/20 p-2 rounded border border-white/5">
