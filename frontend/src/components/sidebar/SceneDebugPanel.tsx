@@ -1,5 +1,5 @@
-import { getBaseUrl } from "@/lib/api";
 "use client";
+import { getBaseUrl } from "@/lib/api";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";

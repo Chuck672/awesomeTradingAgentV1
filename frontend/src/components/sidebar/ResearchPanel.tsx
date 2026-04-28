@@ -1,5 +1,5 @@
-import { getBaseUrl } from "@/lib/api";
 "use client";
+import { getBaseUrl } from "@/lib/api";
 
 import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,7 @@ export function ResearchPanel(props: {
     setJob(null);
     setReport(null);
     try {
-      const r = await fetch(`${getBaseUrl()}/api/research/event-study/run", {
+      const r = await fetch(`${getBaseUrl()}/api/research/event-study/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

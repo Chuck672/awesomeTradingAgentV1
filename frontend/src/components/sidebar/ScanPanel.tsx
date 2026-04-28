@@ -1,5 +1,5 @@
-import { getBaseUrl } from "@/lib/api";
 "use client";
+import { getBaseUrl } from "@/lib/api";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -46,7 +46,7 @@ export function ScanPanel(props: { onExecuteActions: (actions: any[]) => Promise
 
   const refreshWatchlist = async () => {
     try {
-      const r = await fetch(`${getBaseUrl()}/api/watchlist");
+      const r = await fetch(`${getBaseUrl()}/api/watchlist`);
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(String(j?.detail || `HTTP ${r.status}`));
       setWatchlist(Array.isArray(j?.symbols) ? j.symbols : []);
@@ -60,7 +60,7 @@ export function ScanPanel(props: { onExecuteActions: (actions: any[]) => Promise
   useEffect(() => {
     refreshWatchlist();
     setSettings(loadSettings());
-    fetch(`${getBaseUrl()}/api/strategies")
+    fetch(`${getBaseUrl()}/api/strategies`)
       .then((r) => r.json())
       .then((j) => {
         const arr = Array.isArray(j?.strategies) ? j.strategies : [];
@@ -74,7 +74,7 @@ export function ScanPanel(props: { onExecuteActions: (actions: any[]) => Promise
     setJob(null);
     setJobId(null);
     try {
-      const r = await fetch(`${getBaseUrl()}/api/scan/run", {
+      const r = await fetch(`${getBaseUrl()}/api/scan/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source, timeframes, lookback_hours: lookbackHours }),
@@ -140,7 +140,7 @@ export function ScanPanel(props: { onExecuteActions: (actions: any[]) => Promise
               try {
                 setErr(null);
                 const sym = newSym.trim();
-                const r = await fetch(`${getBaseUrl()}/api/watchlist/add", {
+                const r = await fetch(`${getBaseUrl()}/api/watchlist/add`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ symbol: sym }),
@@ -165,7 +165,7 @@ export function ScanPanel(props: { onExecuteActions: (actions: any[]) => Promise
               onClick={async () => {
                 try {
                   setErr(null);
-                  const r = await fetch(`${getBaseUrl()}/api/watchlist/remove", {
+                  const r = await fetch(`${getBaseUrl()}/api/watchlist/remove`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ symbol: s }),
@@ -238,7 +238,7 @@ export function ScanPanel(props: { onExecuteActions: (actions: any[]) => Promise
               }
               setStrategyRunning(true);
               try {
-                const r = await fetch(`${getBaseUrl()}/api/ai/strategy-scan", {
+                const r = await fetch(`${getBaseUrl()}/api/ai/strategy-scan`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
@@ -395,7 +395,7 @@ export function ScanPanel(props: { onExecuteActions: (actions: any[]) => Promise
                           };
                           // 清理 null/undefined
                           Object.keys(ep).forEach((k) => (ep[k] == null ? delete ep[k] : null));
-                          const r = await fetch(`${getBaseUrl()}/api/research/strategy-backtest/run", {
+                          const r = await fetch(`${getBaseUrl()}/api/research/strategy-backtest/run`, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
@@ -462,7 +462,7 @@ export function ScanPanel(props: { onExecuteActions: (actions: any[]) => Promise
               setBreakoutJob(null);
               setBreakoutRunning(true);
               try {
-                const p = await fetch(`${getBaseUrl()}/api/strategy/parse", {
+                const p = await fetch(`${getBaseUrl()}/api/strategy/parse`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
@@ -484,7 +484,7 @@ export function ScanPanel(props: { onExecuteActions: (actions: any[]) => Promise
                         : "策略暂不可执行（请调整描述）";
                   throw new Error(msg);
                 }
-                const r = await fetch(`${getBaseUrl()}/api/strategy/scan", {
+                const r = await fetch(`${getBaseUrl()}/api/strategy/scan`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ strategy_spec: p.strategy_spec }),

@@ -1,5 +1,5 @@
-import { getBaseUrl } from "@/lib/api";
 "use client";
+import { getBaseUrl } from "@/lib/api";
 
 import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ export function OptimizePanel(props: { symbol?: string; timeframe?: string }) {
   const sym = symbol || "XAUUSDz";
 
   React.useEffect(() => {
-    fetch(`${getBaseUrl()}/api/strategies")
+    fetch(`${getBaseUrl()}/api/strategies`)
       .then((r) => r.json())
       .then((d) => {
         if (d?.ok && Array.isArray(d.strategies)) setStrategies(d.strategies);
@@ -41,7 +41,7 @@ export function OptimizePanel(props: { symbol?: string; timeframe?: string }) {
     setRunning(true);
     setJob(null);
     try {
-      const r = await fetch(`${getBaseUrl()}/api/optimize/run", {
+      const r = await fetch(`${getBaseUrl()}/api/optimize/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

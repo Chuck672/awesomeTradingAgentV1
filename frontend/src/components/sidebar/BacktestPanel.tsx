@@ -1,5 +1,5 @@
-import { getBaseUrl } from "@/lib/api";
 "use client";
+import { getBaseUrl } from "@/lib/api";
 
 import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,7 @@ export function BacktestPanel(props: {
 
   // 拉取策略列表
   React.useEffect(() => {
-    fetch(`${getBaseUrl()}/api/strategies")
+    fetch(`${getBaseUrl()}/api/strategies`)
       .then((r) => r.json())
       .then((d) => {
         if (d?.ok && Array.isArray(d.strategies)) setStrategies(d.strategies);
@@ -120,7 +120,7 @@ export function BacktestPanel(props: {
         }
       }
 
-      const r = await fetch(`${getBaseUrl()}/api/research/strategy-backtest/run", {
+      const r = await fetch(`${getBaseUrl()}/api/research/strategy-backtest/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

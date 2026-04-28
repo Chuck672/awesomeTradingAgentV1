@@ -1,5 +1,5 @@
-import { getBaseUrl } from "@/lib/api";
 "use client";
+import { getBaseUrl } from "@/lib/api";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -114,7 +114,7 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   useEffect(() => {
     (async () => {
       try {
-        const cat = await fetch(`${getBaseUrl()}/api/market/features/catalog").then(readJsonOrThrow);
+        const cat = await fetch(`${getBaseUrl()}/api/market/features/catalog`).then(readJsonOrThrow);
         setFeatureCatalog(cat);
       } catch (e: any) {
         setErr(e?.message || "Failed to load feature catalog");
@@ -205,11 +205,11 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   const refresh = async () => {
     setErr(null);
     try {
-      const a = await fetch(`${getBaseUrl()}/api/alerts").then(readJsonOrThrow);
+      const a = await fetch(`${getBaseUrl()}/api/alerts`).then(readJsonOrThrow);
       setAlerts(Array.isArray(a?.alerts) ? a.alerts : []);
-      const e = await fetch(`${getBaseUrl()}/api/alerts/events?limit=100").then(readJsonOrThrow);
+      const e = await fetch(`${getBaseUrl()}/api/alerts/events?limit=100`).then(readJsonOrThrow);
       setEvents(Array.isArray(e?.events) ? e.events : []);
-      const rp = await fetch(`${getBaseUrl()}/api/alerts/reports?limit=50").then(readJsonOrThrow);
+      const rp = await fetch(`${getBaseUrl()}/api/alerts/reports?limit=50`).then(readJsonOrThrow);
       setReports(Array.isArray(rp?.reports) ? rp.reports : []);
     } catch (e: any) {
       setErr(e?.message || "Failed to load");
@@ -225,7 +225,7 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   const loadAnalyzerPrompt = async () => {
     setErr(null);
     try {
-      const r = await fetch(`${getBaseUrl()}/api/alerts/analyzer-prompt").then(readJsonOrThrow);
+      const r = await fetch(`${getBaseUrl()}/api/alerts/analyzer-prompt`).then(readJsonOrThrow);
       setAnalyzerPrompt(String(r?.prompt || ""));
       setAnalyzerPromptDirty(false);
     } catch (e: any) {
@@ -236,7 +236,7 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   const saveAnalyzerPrompt = async () => {
     setErr(null);
     try {
-      const r = await fetch(`${getBaseUrl()}/api/alerts/analyzer-prompt", {
+      const r = await fetch(`${getBaseUrl()}/api/alerts/analyzer-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: analyzerPrompt }),
@@ -252,7 +252,7 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   const clearEventLogs = async () => {
     setErr(null);
     try {
-      const r = await fetch(`${getBaseUrl()}/api/alerts/events/clear", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }).then(readJsonOrThrow);
+      const r = await fetch(`${getBaseUrl()}/api/alerts/events/clear`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }).then(readJsonOrThrow);
       if (!r?.ok) throw new Error(r?.detail || "Failed to clear");
       setEvents([]);
       refresh();
@@ -264,7 +264,7 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
   const clearAIReports = async () => {
     setErr(null);
     try {
-      const r = await fetch(`${getBaseUrl()}/api/alerts/reports/clear", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }).then(readJsonOrThrow);
+      const r = await fetch(`${getBaseUrl()}/api/alerts/reports/clear`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }).then(readJsonOrThrow);
       if (!r?.ok) throw new Error(r?.detail || "Failed to clear");
       setReports([]);
       setSelectedReportId(null);
@@ -330,7 +330,7 @@ export function AlertsPanel(props: { symbol?: string; timeframe?: string }) {
         name = `Detector Trigger ${symbol} ${triggerTimeframe || timeframe}`;
       }
 
-      const r = await fetch(`${getBaseUrl()}/api/alerts/create", {
+      const r = await fetch(`${getBaseUrl()}/api/alerts/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, rule, enabled: true }),
