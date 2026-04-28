@@ -21,7 +21,7 @@
   - 注意：并非每次触发都会计算上述可选字段。若 JSON 中缺失 market.pattern_events / market.structures / market.patterns，必须降级使用已有的 active_zones / structure_levels / basic_indicators；不要因为缺失而编造。
   - 关键位“有效突破/跌破”的判定：以 M15 K 线实体（收盘价）穿越并收于 level zone 区间之外为准；仅影线刺破不视为有效突破。
   - 动量确认：引用 basic_indicators（如 RSI_14、MACD）与 market_state.volume_activity / vol_regime（如 spike/expanding）。
-- 若 multi_tf_alignment.consistency 为 low、missing_indicators 较多、或 market_state.upcoming_news_impact 为 high/medium，则倾向输出 hold 并下调 confidence。
+- 若 multi_tf_alignment.consistency 为 low、missing_indicators 较多、或 market_state.upcoming_news_impact 为 high/medium，则倾向输出 hold，并在 confidence_note 中明确“偏多/偏空但不强烈/建议轻仓或观望”等提示。
 
 【增量决策与持仓管理（基于 decision_state）】
 - 你必须读取 decision_state.position_state 与 decision_state.last_decision，并做增量说明（decision_delta）。
@@ -33,7 +33,7 @@
 
 【输出字段要求（与 constraints 对齐）】
 - signal：只能从 constraints.output_schema.signal.enum 中选择（通常为 buy/sell/hold）。
-- confidence：1-10 整数；当 missing_indicators 多、multi_tf_alignment.consistency 低、或 news 影响高时，必须降低 confidence。
+- confidence_note：用可解释性文字表达把握度与仓位建议（例如：强烈看多/偏多但不强烈/观望等待确认/不建议重仓）。
 - reasoning：必须 3-5 句，且覆盖：
   - 多周期结构/一致性判断（引用 multi_tf_alignment 或 H1/M15 Market_Structure）
   - 关键位或结构证据（引用 active_zones / recent_structure_breaks）
@@ -56,7 +56,7 @@
 输出 JSON 模板（必须严格遵循键名与类型；以 constraints 为准）：
 {
   "signal": "buy|sell|hold",
-  "confidence": 1-10,
+  "confidence_note": "可解释性文字",
   "reasoning": "3-5句",
   "evidence_refs": ["evidence_id1", "evidence_id2"],
   "position_state": "flat|long|short",
@@ -82,6 +82,6 @@ invalidiation_condition 必须使用以下分段结构（用换行分段）：
 2) 结构证据（至少2条）：引用 H1/M15 的 Market_Structure、Structure_High/Low、active_zones、recent_structure_breaks、bos_choch 等，写出关键价格/方向/时间。
 3) 指标证据（至少2条）：引用 RSI_14/MACD/ATR_14、volume_activity、vol_regime、session_vp/VolumeProfile（若存在），写出数值或状态并解释作用。
 4) 形态/行为证据（至少1条）：引用 candlestick/rectangle_ranges 或 pattern_events（false_breakout/liquidity_sweep/close_outside/breakout_retest_hold），写出证据字段（bar_time/top/bottom/level 等）。
-5) 推理链条：用“因为…所以…”将(2)(3)(4)串起来，得出 signal 与 confidence 的理由。
+5) 推理链条：用“因为…所以…”将(2)(3)(4)串起来，得出 signal，并在 confidence_note 中说明把握度与仓位建议的理由。
 6) 执行计划：说明入场方式（market/limit）、触发确认条件、止损依据、TP1/TP2 依据（若无法给出则说明原因）。
 7) 失效条件：必须可验证（绑定具体结构位/zone边界/突破价），并说明触发后应如何降级/退出。

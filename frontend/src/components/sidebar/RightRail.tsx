@@ -1,9 +1,9 @@
 "use client";
 
 import React from "react";
-import { CalendarDays, BrainCircuit, Siren, Radar, Activity } from "lucide-react";
+import { CalendarDays, BrainCircuit, Siren, Radar, Activity, Wrench } from "lucide-react";
 
-export type RightPanelId = "none" | "agent" | "alerts" | "scan" | "patterns" | "calendar";
+export type RightPanelId = "none" | "agent" | "alerts" | "scan" | "patterns" | "calendar" | "tools";
 
 function RailButton(props: { active: boolean; title: string; onClick: () => void; children: React.ReactNode }) {
   const { active, title, onClick, children } = props;
@@ -45,6 +45,9 @@ export function RightRail(props: { active: RightPanelId; onToggle: (id: RightPan
         </RailButton>
         <RailButton active={active === "calendar"} title="Economic Calendar" onClick={() => onToggle(active === "calendar" ? "none" : "calendar")}>
           <CalendarDays size={20} />
+        </RailButton>
+        <RailButton active={active === "tools"} title="Tools" onClick={() => onToggle(active === "tools" ? "none" : "tools")}>
+          <Wrench size={20} />
         </RailButton>
       </div>
 

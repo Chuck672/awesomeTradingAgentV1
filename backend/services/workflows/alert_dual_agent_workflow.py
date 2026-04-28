@@ -153,7 +153,7 @@ class AlertDualAgentWorkflow:
         
         class AnalyzerPlan(BaseModel):
             signal: str = Field(description="Trading signal: buy, sell, or hold")
-            confidence: float = Field(description="Confidence score of the signal, 0.0 to 100.0")
+            confidence_note: str = Field(description="Human-readable confidence assessment and sizing guidance")
             entry_type: Optional[str] = Field(None, description="Type of entry: market, limit, or stop")
             entry_price: Optional[float] = Field(None, description="Suggested entry price level")
             stop_loss: Optional[float] = Field(None, description="Suggested stop loss price level")
@@ -246,8 +246,11 @@ class AlertDualAgentWorkflow:
         try:
             raw_prompt = (
                 "你是资深交易分析师。请基于下面的事件触发与上下文，输出一份详细的中文策略报告。\n"
+                "你必须严格遵循 AnalyzerPlan(JSON) 的交易参数：signal/entry_type/entry_price/stop_loss/take_profit/risk_reward_ratio/trade_horizon/confidence_note。\n"
+                "止损、止盈、入场价、盈亏比不得重新计算，不得给出替代方案（例如 TP1/TP2 或不同的止损止盈），必须与 AnalyzerPlan 数值一致。\n"
                 "要求：必须引用输入 JSON 中的具体结构/指标/形态证据（例如 zone/break/bos/choch/pattern 的 id 与关键字段），并用因果链条说明结论。\n"
                 "输出使用 Markdown 分段：Trigger 解读/结构证据/指标证据/形态证据/推理链条/执行计划/失效条件。\n"
+                "执行计划段必须显式复述 AnalyzerPlan 的入场/止损/止盈/盈亏比，并解释这些数值分别锚定在什么结构/zone/ATR 上。\n"
             )
             raw_msg = await asyncio.to_thread(
                 analyzer_llm.invoke,
@@ -255,6 +258,9 @@ class AlertDualAgentWorkflow:
                     HumanMessage(
                         content=(
                             raw_prompt
+                            + "\n\nAnalyzerPlan(JSON):\n```json\n"
+                            + json.dumps(analyzer_plan or {}, ensure_ascii=False)
+                            + "\n```"
                             + "\n\nDecision State JSON:\n```json\n"
                             + json.dumps(decision_state, ensure_ascii=False)
                             + "\n```"
@@ -294,7 +300,7 @@ class AlertDualAgentWorkflow:
                     "position_state": _normalize_position_state(analyzer_plan),
                     "last_decision": {
                         "signal": analyzer_plan.get("signal"),
-                        "confidence": analyzer_plan.get("confidence"),
+                        "confidence_note": analyzer_plan.get("confidence_note"),
                         "evidence_refs": analyzer_plan.get("evidence_refs"),
                         "entry_type": analyzer_plan.get("entry_type"),
                         "entry_price": analyzer_plan.get("entry_price"),

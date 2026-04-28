@@ -330,7 +330,7 @@ class IngestionService:
         return bars
 
     def _tf_to_seconds(self, tf: str) -> int:
-        mapping = {"M1": 60, "M5": 300, "M15": 900, "H1": 3600, "D1": 86400}
+        mapping = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400, "W1": 604800, "MN1": 2592000, "MN": 2592000}
         return mapping.get(tf, 60)
         
     def _get_mt5_timeframe(self, tf_str: str):

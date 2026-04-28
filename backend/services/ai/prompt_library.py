@@ -14,7 +14,7 @@ DEFAULT_ALERT_ANALYZER_PROMPT = """
 输出要求：
 - 只输出一个合法 JSON（不要输出任何额外文本）。
 - 字段以运行时 schema/constraints 为准；如果 constraints 缺失，则至少包含：
-  signal/confidence/entry_type/entry_price/stop_loss/take_profit/risk_reward_ratio/evidence_refs/invalidation_condition/trade_horizon。
+  signal/confidence_note/entry_type/entry_price/stop_loss/take_profit/risk_reward_ratio/evidence_refs/invalidation_condition/trade_horizon。
 - 禁止捏造：所有关键价格与证据必须来自输入 JSON；无法确认时输出 hold 并写明原因。
 
 证据链要求：

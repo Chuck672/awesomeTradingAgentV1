@@ -7,6 +7,7 @@ import { AlertsPanel } from "./AlertsPanel";
 import { PipelineWorkbenchPanel } from "./PipelineWorkbenchPanel";
 import { PatternInspectorPanel } from "./PatternInspectorPanel";
 import { CalendarPanel } from "./CalendarPanel";
+import { ToolsPanel } from "./ToolsPanel";
 import type { RightPanelId } from "./RightRail";
 
 export function RightPanel(props: {
@@ -82,6 +83,7 @@ export function RightPanel(props: {
     if (panel === "scan") return "Pipeline";
     if (panel === "patterns") return "Patterns Inspector";
     if (panel === "calendar") return "Economic Calendar";
+    if (panel === "tools") return "Tools";
     return "";
   }, [panel]);
 
@@ -125,6 +127,7 @@ export function RightPanel(props: {
         {panel === "scan" && <PipelineWorkbenchPanel onExecuteActions={(actions) => (onAiExecuteActions ? onAiExecuteActions(actions) : [])} />}
         {panel === "patterns" && <PatternInspectorPanel symbol={symbol} timeframe={timeframe} onExecuteActions={onAiExecuteActions} />}
         {panel === "calendar" && <CalendarPanel />}
+        {panel === "tools" && <ToolsPanel symbol={symbol} timeframe={timeframe} />}
       </div>
     </aside>
   );

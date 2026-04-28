@@ -199,6 +199,35 @@ async def get_sync_progress():
     from backend.services.ingestion import ingestion_service
     return list(ingestion_service.active_progress.values())
 
+@router.post("/tools/gap-repair")
+async def tools_gap_repair(payload: Dict[str, Any] = Body(default={})):
+    symbol = str(payload.get("symbol") or "").strip()
+    timeframe = str(payload.get("timeframe") or "").strip()
+    all_timeframes = bool(payload.get("all_timeframes", True))
+    days_lookback = int(payload.get("days_lookback") or 15)
+
+    if not symbol:
+        raise HTTPException(status_code=400, detail="symbol is required")
+    if days_lookback <= 0:
+        days_lookback = 15
+
+    from backend.services.ingestion import ingestion_service
+
+    if all_timeframes:
+        timeframes = ["M1", "M5", "M15", "M30", "H1", "H4", "D1"]
+    else:
+        if not timeframe:
+            raise HTTPException(status_code=400, detail="timeframe is required when all_timeframes=false")
+        timeframes = [timeframe]
+
+    results: List[Dict[str, Any]] = []
+    for tf in timeframes:
+        rep = await ingestion_service.check_and_repair_gaps(symbol, tf, days_lookback=days_lookback)
+        results.append({"symbol": symbol, "timeframe": tf, "result": rep})
+        await asyncio.sleep(0)
+
+    return {"ok": True, "symbol": symbol, "timeframes": timeframes, "results": results}
+
 @router.get("/symbols")
 async def get_symbols():
     """Returns the list of active symbols and their supported timeframes."""
