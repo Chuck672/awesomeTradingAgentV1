@@ -170,6 +170,7 @@ class AlertDualAgentWorkflow:
             confirm_rules: Optional[List[str]] = Field(None, description="Atomic confirm rules list")
             invalidate_rules: Optional[List[str]] = Field(None, description="Atomic invalidation rules list")
             evidence_refs: Optional[List[str]] = Field(None, description="List of evidence references")
+            targets: Optional[List[float]] = Field(None, description="Optional target levels for visualization")
 
         class AnalyzerPlan(PlaybookPlan):
             confidence_note: str = Field(description="Human-readable confidence assessment and sizing guidance")
@@ -177,6 +178,188 @@ class AlertDualAgentWorkflow:
             invalidation_condition: Optional[str] = Field(None, description="Condition that invalidates the trade")
             trade_horizon: Optional[str] = Field(None, description="Expected time horizon for the trade")
             alternate_plan: Optional[PlaybookPlan] = Field(None, description="Alternate mutually-exclusive plan")
+
+        def _infer_trigger_family() -> str:
+            t = f"{trigger_type} {trigger_text}".lower()
+            if "trend_exhaustion" in t or "te_" in t:
+                return "trend_exhaustion"
+            if "rectangle" in t:
+                return "rectangle_range"
+            if "msb" in t or "zigzag_break" in t or "bos" in t or "choch" in t:
+                return "msb_break"
+            if "raja" in t or "sr_touch" in t or "level_zone" in t:
+                return "raja_sr"
+            return "generic"
+
+        def _close_outside_confirm_n(exec_tf: str) -> int:
+            tf = str(exec_tf or "").upper()
+            if tf == "M15":
+                return 2
+            if tf == "M30":
+                return 1
+            return 1
+
+        def _get_exec_tf() -> str:
+            ev = context.get("event") if isinstance(context, dict) else {}
+            tf = (ev or {}).get("exec_tf") if isinstance(ev, dict) else None
+            return str(tf or timeframe)
+
+        def _get_trend_tf() -> str:
+            ev = context.get("event") if isinstance(context, dict) else {}
+            tf = (ev or {}).get("trend_tf") if isinstance(ev, dict) else None
+            return str(tf or "H1")
+
+        def _find_rectangle_bounds(tf_hint: str) -> tuple[float | None, float | None]:
+            m = context.get("market") if isinstance(context, dict) else None
+            pats = (m or {}).get("patterns") if isinstance(m, dict) else None
+            p = (pats or {}).get(tf_hint) if isinstance(pats, dict) else None
+            if not isinstance(p, dict):
+                return None, None
+            rects = p.get("rectangle_ranges")
+            if not isinstance(rects, list) or not rects:
+                return None, None
+            it = rects[0] if isinstance(rects[0], dict) else None
+            if not isinstance(it, dict):
+                return None, None
+            try:
+                top = float(it.get("top"))
+                bottom = float(it.get("bottom"))
+                return bottom, top
+            except Exception:
+                return None, None
+
+        def _get_swing_points(tf_hint: str) -> list[dict]:
+            m = context.get("market") if isinstance(context, dict) else None
+            inds = (m or {}).get("indicators") if isinstance(m, dict) else None
+            it = (inds or {}).get(tf_hint) if isinstance(inds, dict) else None
+            adv = (it or {}).get("advanced_indicators") if isinstance(it, dict) else None
+            sp = (adv or {}).get("Swing_Points") if isinstance(adv, dict) else None
+            return sp if isinstance(sp, list) else []
+
+        def _swing_wraps_rectangle(tf_hint: str) -> bool:
+            b, t = _find_rectangle_bounds(tf_hint)
+            if b is None or t is None:
+                return False
+            sps = _get_swing_points(tf_hint)
+            tail = [x for x in sps[-4:] if isinstance(x, dict)]
+            has_h = any(str(x.get("kind") or "") == "H" and float(x.get("price") or 0.0) >= float(t) for x in tail)
+            has_l = any(str(x.get("kind") or "") == "L" and float(x.get("price") or 0.0) <= float(b) for x in tail)
+            return bool(has_h and has_l)
+
+        def _policy_params() -> dict:
+            exec_tf = _get_exec_tf()
+            return {
+                "raja_sr": {"cooldown_sec": 900, "first_touch_age_candles": 10},
+                "close_outside_confirm_n": _close_outside_confirm_n(exec_tf),
+                "retest_buffer_atr_mult": {"min": 0.35, "max": 0.60, "default": 0.45},
+                "swing_wraps_rectangle": _swing_wraps_rectangle(exec_tf),
+            }
+
+        def _compact_context_for_analyzer(family: str) -> dict:
+            exec_tf = _get_exec_tf()
+            trend_tf = _get_trend_tf()
+            m = context.get("market") if isinstance(context, dict) else {}
+            inds = (m.get("indicators") or {}) if isinstance(m, dict) else {}
+            pats = (m.get("patterns") or {}) if isinstance(m, dict) else {}
+            evs = (m.get("pattern_events") or {}) if isinstance(m, dict) else {}
+            structs = (m.get("structures") or {}) if isinstance(m, dict) else {}
+
+            def _pick_ind(tf: str) -> dict:
+                it = inds.get(tf)
+                if not isinstance(it, dict):
+                    return {"error": "missing"}
+                adv = it.get("advanced_indicators") if isinstance(it.get("advanced_indicators"), dict) else {}
+                basic = it.get("basic_indicators") if isinstance(it.get("basic_indicators"), dict) else {}
+                keep_adv = {k: adv.get(k) for k in ("Market_Structure", "Structure_High", "Structure_Low", "Trend_Exhaustion", "Swing_Points") if k in adv}
+                keep_basic = {k: basic.get(k) for k in ("ATR_14", "RSI_14", "MACD") if k in basic}
+                return {
+                    "current_price": it.get("current_price"),
+                    "basic_indicators": keep_basic,
+                    "advanced_indicators": keep_adv,
+                    "active_zones": it.get("active_zones"),
+                    "recent_structure_breaks": it.get("recent_structure_breaks"),
+                }
+
+            def _pick_events(tf: str) -> list:
+                xs = evs.get(tf)
+                if not isinstance(xs, list):
+                    return []
+                allow = {"bos_choch", "liquidity_sweep", "false_breakout", "close_outside_level_zone", "breakout_retest_hold"}
+                out = []
+                for it in xs:
+                    if not isinstance(it, dict):
+                        continue
+                    et = str(it.get("type") or it.get("event_type") or "")
+                    if not et:
+                        out.append(it)
+                        continue
+                    if any(k in et for k in allow):
+                        out.append(it)
+                return out[:40]
+
+            def _pick_rect(tf: str) -> list:
+                p = pats.get(tf)
+                if not isinstance(p, dict):
+                    return []
+                rects = p.get("rectangle_ranges")
+                if not isinstance(rects, list):
+                    return []
+                return rects[:3]
+
+            payload = {
+                "event": context.get("event"),
+                "multi_tf_alignment": context.get("multi_tf_alignment"),
+                "market_state": context.get("market_state"),
+                "policy_params": _policy_params(),
+                "market": {
+                    "indicators": {trend_tf: _pick_ind(trend_tf), exec_tf: _pick_ind(exec_tf)},
+                    "patterns": {exec_tf: {"rectangle_ranges": _pick_rect(exec_tf)}},
+                    "pattern_events": {exec_tf: _pick_events(exec_tf)},
+                    "structures": {exec_tf: structs.get(exec_tf)},
+                },
+            }
+            return payload
+
+        def _trigger_guidance(family: str) -> str:
+            params = _policy_params()
+            exec_tf = _get_exec_tf()
+            n_close = int(params.get("close_outside_confirm_n") or 1)
+            first_touch = int(((params.get("raja_sr") or {}).get("first_touch_age_candles") or 10))
+            swing_wrap = bool(params.get("swing_wraps_rectangle"))
+            ret_min = float(((params.get("retest_buffer_atr_mult") or {}).get("min") or 0.35))
+            ret_max = float(((params.get("retest_buffer_atr_mult") or {}).get("max") or 0.60))
+            if family == "raja_sr":
+                return (
+                    "你正在处理 RajaSR level-zone 触发。主线：判断真突破/假突破/不确定，并输出 PRIMARY+ALTERNATE 两套互斥 playbook。\n"
+                    f"首次触及规则：zone.last_touch_age_candles >= {first_touch} 视为第一次触及；第一次触及禁止 market 直接入场，必须 status=wait。\n"
+                    f"站稳规则：{exec_tf} 需要连续 {n_close} 根收盘在 zone 外侧才算 close_outside 确认（写入 invalidation_condition）。\n"
+                    f"trend_breakout/break-retest 的 retest buffer 使用 ATR_14(exec_tf) 的区间：[{ret_min}, {ret_max}] * ATR。\n"
+                    "不确定时：signal=hold、status=wait，但仍需给 entry_zone（使用 level-zone edge）并在 targets 里给上下两个可能目标价位（用于虚线落图），不要给 SL。\n"
+                )
+            if family == "msb_break":
+                return (
+                    "你正在处理 MSB/ZigZag Break 触发。主线：MSB Break 只作为结构提示，不允许直接 market 入场。\n"
+                    "必须回到关键 level-zone 或 rectangle 边界判断是否站稳/是否回踩确认，输出 wait 的 entry_zone 与确认线。\n"
+                    "PRIMARY/ALTERNATE 的 entry_zone 必须能落到 zone/rectangle 边界上。\n"
+                )
+            if family == "rectangle_range":
+                return (
+                    "你正在处理 Rectangle Range breakout 触发。主线：判断这是趋势中继突破还是被大震荡包裹的噪声突破。\n"
+                    f"大震荡包裹判定：swing_wraps_rectangle={str(swing_wrap).lower()}（最近4个 swing points 同时存在 swing high>=rect.top 与 swing low<=rect.bottom）。若为 true，优先 hold/uncertain，并输出双向 targets。\n"
+                    f"站稳规则：{exec_tf} 需要连续 {n_close} 根收盘在 rectangle 外侧才算突破确认（写入 invalidation_condition）。\n"
+                    f"retest buffer 使用 ATR_14(exec_tf) 的区间：[{ret_min}, {ret_max}] * ATR。\n"
+                )
+            if family == "trend_exhaustion":
+                return (
+                    "你正在处理 Trend Exhaustion 触发。主线：判断是否真反转。\n"
+                    "真反转需要结构确认（exec_tf 的 ChoCh/BoS）与 TE reversal 同向共振；否则输出 hold/uncertain，并用 targets 标注上下最近 level-zone。\n"
+                )
+            return "请按 trigger_event_playbooks 的方法输出 playbook，并确保 entry_zone/confirm/invalidate 可落图。\n"
+
+        trigger_family = _infer_trigger_family()
+        compact_context = _compact_context_for_analyzer(trigger_family)
+        context_json_for_prompt = json.dumps(compact_context, ensure_ascii=False)
+        analyzer_prompt_final = analyzer_prompt + "\n" + _trigger_guidance(trigger_family)
 
         try:
             # 引入 Structured Output 强制约束输出格式，杜绝解析异常
@@ -186,7 +369,7 @@ class AlertDualAgentWorkflow:
                 [
                     HumanMessage(
                         content=(
-                            analyzer_prompt
+                            analyzer_prompt_final
                             + "\n\nDecision State JSON:\n```json\n"
                             + json.dumps(
                                 decision_state,
@@ -196,7 +379,7 @@ class AlertDualAgentWorkflow:
                             + "\n\n事件触发描述:\n"
                             + str(trigger_text)
                             + "\n\n上下文 JSON:\n```json\n"
-                            + context_json
+                            + context_json_for_prompt
                             + "\n```"
                         )
                     )
@@ -454,8 +637,8 @@ class AlertDualAgentWorkflow:
             if not isinstance(plan, dict):
                 return plan
             st = str(plan.get("status") or "").strip().lower()
-            et = plan.get("entry_type")
-            wait = st == "wait" or et is None
+            et = str(plan.get("entry_type") or "").strip().lower()
+            wait = st == "wait" or et not in ("market", "limit", "stop")
             if wait:
                 plan["entry_type"] = None
                 plan["entry_price"] = None
@@ -465,8 +648,8 @@ class AlertDualAgentWorkflow:
             alt = plan.get("alternate_plan")
             if isinstance(alt, dict):
                 st2 = str(alt.get("status") or "").strip().lower()
-                et2 = alt.get("entry_type")
-                if st2 == "wait" or et2 is None:
+                et2 = str(alt.get("entry_type") or "").strip().lower()
+                if st2 == "wait" or et2 not in ("market", "limit", "stop"):
                     alt["entry_type"] = None
                     alt["entry_price"] = None
                     alt["stop_loss"] = None
@@ -485,11 +668,12 @@ class AlertDualAgentWorkflow:
         try:
             raw_prompt = (
                 "你是资深交易分析师。请基于下面的事件触发与上下文，输出一份详细的中文策略报告。\n"
-                "你必须严格遵循 AnalyzerPlan(JSON) 的交易参数：signal/entry_type/entry_price/stop_loss/take_profit/risk_reward_ratio/trade_horizon/confidence_note。\n"
-                "止损、止盈、入场价、盈亏比不得重新计算，不得给出替代方案（例如 TP1/TP2 或不同的止损止盈），必须与 AnalyzerPlan 数值一致。\n"
+                "你必须严格遵循 AnalyzerPlan(JSON) 的字段，不得编造计划外的价位。\n"
+                "若 AnalyzerPlan.status=wait 或 entry_type 为 null：不得输出具体 entry/sl/tp 数值；请围绕 entry_zone + confirm_rules + invalidate_rules + targets 讲清楚“等哪里、等什么、失效在哪、目标在哪”。\n"
+                "若 AnalyzerPlan.status=ready：必须复述 entry/sl/tp/rr 的数值并解释锚定依据；不得给出替代方案（例如 TP1/TP2）。\n"
                 "要求：必须引用输入 JSON 中的具体结构/指标/形态证据（例如 zone/break/bos/choch/pattern 的 id 与关键字段），并用因果链条说明结论。\n"
-                "输出使用 Markdown 分段：Trigger 解读/结构证据/指标证据/形态证据/推理链条/执行计划/失效条件。\n"
-                "执行计划段必须显式复述 AnalyzerPlan 的入场/止损/止盈/盈亏比，并解释这些数值分别锚定在什么结构/zone/ATR 上。\n"
+                "输出使用 Markdown 分段：Trigger 解读/Regime/PRIMARY 剧本/ALTERNATE 剧本/执行步骤/失效条件。\n"
+                "执行步骤段必须把 confirm_rules/invalidate_rules 逐条解释为“图表上应该看到什么”。\n"
             )
             raw_msg = await asyncio.to_thread(
                 analyzer_llm.invoke,
@@ -506,7 +690,7 @@ class AlertDualAgentWorkflow:
                             + "\n\n事件触发描述:\n"
                             + str(trigger_text)
                             + "\n\n上下文 JSON:\n```json\n"
-                            + context_json
+                            + context_json_for_prompt
                             + "\n```"
                         )
                     )
@@ -796,6 +980,21 @@ class AlertDualAgentWorkflow:
                         continue
                     used.add((tag, "i", k))
                     objects.append({"type": "hline", "price": float(price), "color": "#f59e0b", "lineStyle": "dashed", "lineWidth": 2})
+
+                tg = plan.get("targets")
+                if isinstance(tg, list):
+                    for x in tg:
+                        try:
+                            price = float(x)
+                        except Exception:
+                            continue
+                        if price <= 0:
+                            continue
+                        k = f"t:{price}"
+                        if (tag, "t", k) in used:
+                            continue
+                        used.add((tag, "t", k))
+                        objects.append({"type": "hline", "price": float(price), "color": base_color, "lineStyle": "dotted", "lineWidth": 1})
 
                 ts = _snapshot_ts()
                 pb = str(plan.get("playbook") or "")

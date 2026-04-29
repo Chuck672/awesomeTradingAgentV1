@@ -260,6 +260,22 @@ def _build_event_context_uncached(
             market["indicators"][tf] = {"error": "context_parse_failed"}
             return
 
+        swing_points = []
+        try:
+            from backend.domain.market.structure.swings import detect_swings
+
+            sw = detect_swings(bars_full, left=2, right=2, max_points=10)
+            for s in sw[-10:]:
+                try:
+                    t = int(getattr(s, "time", 0) or 0)
+                    price = float(getattr(s, "price", 0.0) or 0.0)
+                    kind = str(getattr(s, "kind", "") or "")
+                    swing_points.append({"kind": kind, "price": price, "time_iso": _ts_to_iso(t), "age_candles": _age_candles(t)})
+                except Exception:
+                    continue
+        except Exception:
+            swing_points = []
+
         try:
             zones_all = calc_raja_sr(bars_full)
         except Exception:
@@ -361,6 +377,8 @@ def _build_event_context_uncached(
         adv = context.get("advanced_indicators") or {}
         if isinstance(adv, dict):
             adv = {k: v for k, v in adv.items() if k not in ("Nearest_Resistance", "Nearest_Support", "Recent_Structure_Breaks")}
+            if swing_points:
+                adv["Swing_Points"] = swing_points[-10:]
 
         market["indicators"][tf] = {
             "current_price": current_price,
