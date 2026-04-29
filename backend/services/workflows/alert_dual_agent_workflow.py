@@ -149,19 +149,34 @@ class AlertDualAgentWorkflow:
         t1 = time.perf_counter()
 
         from pydantic import BaseModel, Field
-        from typing import Optional, List
+        from typing import Optional, List, Dict, Any, Tuple
         
-        class AnalyzerPlan(BaseModel):
-            signal: str = Field(description="Trading signal: buy, sell, or hold")
-            confidence_note: str = Field(description="Human-readable confidence assessment and sizing guidance")
+        class EntryZone(BaseModel):
+            bottom: Optional[float] = Field(None, description="Entry zone bottom price")
+            top: Optional[float] = Field(None, description="Entry zone top price")
+            timeframe: Optional[str] = Field(None, description="Timeframe for this zone (e.g., M15/H1)")
+            ref: Optional[str] = Field(None, description="Reference id for this zone (e.g., zone_M15_xxx / rectangle_range)")
+
+        class PlaybookPlan(BaseModel):
+            signal: str = Field(description="Trading bias: buy, sell, or hold")
+            playbook: Optional[str] = Field(None, description="Selected execution playbook")
+            status: Optional[str] = Field(None, description="wait or ready")
             entry_type: Optional[str] = Field(None, description="Type of entry: market, limit, or stop")
+            entry_zone: Optional[EntryZone] = Field(None, description="Where to wait for entry")
             entry_price: Optional[float] = Field(None, description="Suggested entry price level")
             stop_loss: Optional[float] = Field(None, description="Suggested stop loss price level")
             take_profit: Optional[float] = Field(None, description="Suggested take profit price level")
             risk_reward_ratio: Optional[float] = Field(None, description="Risk to reward ratio")
+            confirm_rules: Optional[List[str]] = Field(None, description="Atomic confirm rules list")
+            invalidate_rules: Optional[List[str]] = Field(None, description="Atomic invalidation rules list")
             evidence_refs: Optional[List[str]] = Field(None, description="List of evidence references")
+
+        class AnalyzerPlan(PlaybookPlan):
+            confidence_note: str = Field(description="Human-readable confidence assessment and sizing guidance")
+            regime: Optional[str] = Field(None, description="Market regime: trend/range/exhaustion")
             invalidation_condition: Optional[str] = Field(None, description="Condition that invalidates the trade")
             trade_horizon: Optional[str] = Field(None, description="Expected time horizon for the trade")
+            alternate_plan: Optional[PlaybookPlan] = Field(None, description="Alternate mutually-exclusive plan")
 
         try:
             # 引入 Structured Output 强制约束输出格式，杜绝解析异常
@@ -330,6 +345,138 @@ class AlertDualAgentWorkflow:
         analyzer_plan = _fill_take_profit(analyzer_plan)
         analyzer_plan = _normalize_trade_levels(analyzer_plan)
         try:
+            inv = str(analyzer_plan.get("invalidation_condition") or "")
+        except Exception:
+            inv = ""
+
+        def _parse_playbook_block(block: str) -> dict:
+            out: dict[str, Any] = {"confirm_rules": [], "invalidate_rules": []}
+            mode = None
+            for raw in (block or "").splitlines():
+                line = raw.strip()
+                if not line:
+                    continue
+                if line.lower().startswith("confirm_rules"):
+                    mode = "confirm"
+                    continue
+                if line.lower().startswith("invalidate_rules"):
+                    mode = "invalidate"
+                    continue
+                if line.startswith("-"):
+                    item = line[1:].strip()
+                    if not item:
+                        continue
+                    if mode == "confirm":
+                        out["confirm_rules"].append(item)
+                    elif mode == "invalidate":
+                        out["invalidate_rules"].append(item)
+                    continue
+                mode = None
+                if line.startswith("regime="):
+                    out["regime"] = line.split("=", 1)[1].strip()
+                elif line.startswith("playbook="):
+                    out["playbook"] = line.split("=", 1)[1].strip()
+                elif line.startswith("bias="):
+                    out["signal"] = line.split("=", 1)[1].strip()
+                elif line.startswith("status="):
+                    out["status"] = line.split("=", 1)[1].strip()
+                elif line.startswith("entry_zone="):
+                    try:
+                        parts = line.split()
+                        ref = parts[0].split("=", 1)[1].strip()
+                        bottom = None
+                        top = None
+                        tf = None
+                        for p in parts[1:]:
+                            if p.startswith("bottom="):
+                                bottom = float(p.split("=", 1)[1])
+                            elif p.startswith("top="):
+                                top = float(p.split("=", 1)[1])
+                            elif p.startswith("tf="):
+                                tf = p.split("=", 1)[1].strip()
+                        out["entry_zone"] = {"ref": ref or None, "bottom": bottom, "top": top, "timeframe": tf}
+                    except Exception:
+                        pass
+            if not out["confirm_rules"]:
+                out["confirm_rules"] = None
+            if not out["invalidate_rules"]:
+                out["invalidate_rules"] = None
+            return out
+
+        def _extract_playbooks_from_text(text: str) -> tuple[dict | None, dict | None, str | None]:
+            if not text:
+                return None, None, None
+            regime = None
+            primary = None
+            alternate = None
+            try:
+                if "[REGIME]" in text:
+                    seg = text.split("[REGIME]", 1)[1]
+                    line0 = seg.strip().splitlines()[0] if seg.strip() else ""
+                    if line0.strip().startswith("regime="):
+                        regime = line0.split("=", 1)[1].strip()
+            except Exception:
+                regime = None
+            try:
+                if "[PRIMARY_PLAYBOOK]" in text:
+                    seg = text.split("[PRIMARY_PLAYBOOK]", 1)[1]
+                    seg = seg.split("[ALTERNATE_PLAYBOOK]", 1)[0] if "[ALTERNATE_PLAYBOOK]" in seg else seg
+                    primary = _parse_playbook_block(seg)
+            except Exception:
+                primary = None
+            try:
+                if "[ALTERNATE_PLAYBOOK]" in text:
+                    seg = text.split("[ALTERNATE_PLAYBOOK]", 1)[1]
+                    seg = seg.split("[EXECUTION]", 1)[0] if "[EXECUTION]" in seg else seg
+                    alternate = _parse_playbook_block(seg)
+            except Exception:
+                alternate = None
+            return primary, alternate, regime
+
+        def _ensure_playbook_fields(plan: dict) -> dict:
+            if not isinstance(plan, dict):
+                return plan
+            inv_txt = str(plan.get("invalidation_condition") or "")
+            primary, alternate, regime_txt = _extract_playbooks_from_text(inv_txt)
+            if plan.get("regime") is None and regime_txt:
+                plan["regime"] = regime_txt
+            if primary:
+                for k in ("playbook", "status", "confirm_rules", "invalidate_rules", "entry_zone"):
+                    if plan.get(k) is None and primary.get(k) is not None:
+                        plan[k] = primary.get(k)
+                if (not plan.get("signal") or str(plan.get("signal")).lower() == "hold") and primary.get("signal"):
+                    plan["signal"] = primary.get("signal")
+            if plan.get("alternate_plan") is None and alternate:
+                plan["alternate_plan"] = alternate
+            return plan
+
+        def _enforce_wait(plan: dict) -> dict:
+            if not isinstance(plan, dict):
+                return plan
+            st = str(plan.get("status") or "").strip().lower()
+            et = plan.get("entry_type")
+            wait = st == "wait" or et is None
+            if wait:
+                plan["entry_type"] = None
+                plan["entry_price"] = None
+                plan["stop_loss"] = None
+                plan["take_profit"] = None
+                plan["risk_reward_ratio"] = None
+            alt = plan.get("alternate_plan")
+            if isinstance(alt, dict):
+                st2 = str(alt.get("status") or "").strip().lower()
+                et2 = alt.get("entry_type")
+                if st2 == "wait" or et2 is None:
+                    alt["entry_type"] = None
+                    alt["entry_price"] = None
+                    alt["stop_loss"] = None
+                    alt["take_profit"] = None
+                    alt["risk_reward_ratio"] = None
+            return plan
+
+        analyzer_plan = _ensure_playbook_fields(analyzer_plan)
+        analyzer_plan = _enforce_wait(analyzer_plan)
+        try:
             analyzer_text = json.dumps(analyzer_plan, ensure_ascii=False, indent=2) if analyzer_plan else analyzer_text
         except Exception:
             pass
@@ -476,6 +623,192 @@ class AlertDualAgentWorkflow:
                 objects.append({"type": "hline", "price": sl, "color": "#ef4444", "text": "SL", "lineStyle": line_style})
             if tp > 0:
                 objects.append({"type": "hline", "price": tp, "color": "#22c55e", "text": "TP", "lineStyle": line_style})
+
+            def _tf_to_seconds(tf: str) -> int:
+                mapping = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400}
+                return int(mapping.get(str(tf or "").upper(), 60))
+
+            def _snapshot_ts() -> int:
+                try:
+                    q = ((context.get("market_state") or {}).get("current_quote") or {}) if isinstance(context, dict) else {}
+                    t = int(q.get("time") or 0)
+                    if t > 0:
+                        return t
+                except Exception:
+                    pass
+                return int(time.time())
+
+            def _find_zone(zone_id: str) -> tuple[float | None, float | None]:
+                if not zone_id:
+                    return None, None
+                m = (context.get("market") or {}) if isinstance(context, dict) else {}
+                inds = (m.get("indicators") or {}) if isinstance(m, dict) else {}
+                for tf_, it in inds.items():
+                    zlist = (it or {}).get("active_zones") if isinstance(it, dict) else None
+                    if not isinstance(zlist, list):
+                        continue
+                    for z in zlist:
+                        if not isinstance(z, dict):
+                            continue
+                        if str(z.get("evidence_id") or "") == zone_id:
+                            try:
+                                b = float(z.get("level_zone_bottom_edge_price"))
+                                t = float(z.get("level_zone_top_edge_price"))
+                                return b, t
+                            except Exception:
+                                return None, None
+                return None, None
+
+            def _find_rectangle(rect_id: str, tf_hint: str | None) -> tuple[float | None, float | None]:
+                m = (context.get("market") or {}) if isinstance(context, dict) else {}
+                pats = (m.get("patterns") or {}) if isinstance(m, dict) else {}
+                tf0 = str(tf_hint or "") or str((context.get("event") or {}).get("exec_tf") or "")
+                cand_tfs = [tf0] + [k for k in pats.keys() if k != tf0]
+                for tf_ in cand_tfs:
+                    p = pats.get(tf_) if isinstance(pats, dict) else None
+                    if not isinstance(p, dict):
+                        continue
+                    rects = p.get("rectangle_ranges")
+                    if not isinstance(rects, list) or not rects:
+                        continue
+                    r0 = rects[0] if isinstance(rects[0], dict) else None
+                    if not isinstance(r0, dict):
+                        continue
+                    try:
+                        top = float(r0.get("top"))
+                        bottom = float(r0.get("bottom"))
+                        return bottom, top
+                    except Exception:
+                        continue
+                return None, None
+
+            def _find_structure_level(tf_: str, kind: str) -> float | None:
+                m = (context.get("market") or {}) if isinstance(context, dict) else {}
+                inds = (m.get("indicators") or {}) if isinstance(m, dict) else {}
+                it = inds.get(tf_) if isinstance(inds, dict) else None
+                adv = (it.get("advanced_indicators") or {}) if isinstance(it, dict) else {}
+                if not isinstance(adv, dict):
+                    return None
+                v = adv.get(kind)
+                try:
+                    return float(v) if v is not None else None
+                except Exception:
+                    return None
+
+            def _resolve_rule_level(rule: str) -> tuple[str, float] | None:
+                r = str(rule or "").strip()
+                if not r:
+                    return None
+                if "zone.top:" in r:
+                    zone_id = r.split("zone.top:", 1)[1].strip()
+                    b, t = _find_zone(zone_id)
+                    if t is not None:
+                        return f"zone.top:{zone_id}", float(t)
+                    return None
+                if "zone.bottom:" in r:
+                    zone_id = r.split("zone.bottom:", 1)[1].strip()
+                    b, t = _find_zone(zone_id)
+                    if b is not None:
+                        return f"zone.bottom:{zone_id}", float(b)
+                    return None
+                if "rectangle.top:" in r:
+                    rect_id = r.split("rectangle.top:", 1)[1].strip()
+                    b, t = _find_rectangle(rect_id, (context.get("event") or {}).get("exec_tf") if isinstance(context, dict) else None)
+                    if t is not None:
+                        return f"rectangle.top:{rect_id}", float(t)
+                    return None
+                if "rectangle.bottom:" in r:
+                    rect_id = r.split("rectangle.bottom:", 1)[1].strip()
+                    b, t = _find_rectangle(rect_id, (context.get("event") or {}).get("exec_tf") if isinstance(context, dict) else None)
+                    if b is not None:
+                        return f"rectangle.bottom:{rect_id}", float(b)
+                    return None
+                if "Structure_High:" in r:
+                    tf_ = r.split("Structure_High:", 1)[1].strip()
+                    v = _find_structure_level(tf_, "Structure_High")
+                    if v is not None:
+                        return f"Structure_High:{tf_}", float(v)
+                    return None
+                if "Structure_Low:" in r:
+                    tf_ = r.split("Structure_Low:", 1)[1].strip()
+                    v = _find_structure_level(tf_, "Structure_Low")
+                    if v is not None:
+                        return f"Structure_Low:{tf_}", float(v)
+                    return None
+                return None
+
+            def _add_playbook_overlay(plan: dict, *, tag: str, base_color: str, fill_opacity: float) -> None:
+                if not isinstance(plan, dict):
+                    return
+                ez = plan.get("entry_zone")
+                if isinstance(ez, dict):
+                    try:
+                        low = float(ez.get("bottom")) if ez.get("bottom") is not None else None
+                        high = float(ez.get("top")) if ez.get("top") is not None else None
+                    except Exception:
+                        low = None
+                        high = None
+                    if low is not None and high is not None and low > 0 and high > 0:
+                        ts = _snapshot_ts()
+                        exec_tf = str((context.get("event") or {}).get("exec_tf") or timeframe)
+                        tf_sec = _tf_to_seconds(exec_tf)
+                        extend_bars = 60
+                        from_time = ts - tf_sec * extend_bars
+                        to_time = ts
+                        objects.append(
+                            {
+                                "type": "box",
+                                "from_time": from_time,
+                                "to_time": to_time,
+                                "low": min(low, high),
+                                "high": max(low, high),
+                                "color": base_color,
+                                "fillColor": base_color,
+                                "fillOpacity": fill_opacity,
+                                "lineStyle": "dotted",
+                                "lineWidth": 1,
+                            }
+                        )
+
+                def _rules_list(key: str) -> list[str]:
+                    xs = plan.get(key)
+                    if isinstance(xs, list):
+                        return [str(x) for x in xs if x is not None]
+                    return []
+
+                used = set()
+                for rr in _rules_list("confirm_rules"):
+                    lvl = _resolve_rule_level(rr)
+                    if not lvl:
+                        continue
+                    k, price = lvl
+                    if (tag, "c", k) in used:
+                        continue
+                    used.add((tag, "c", k))
+                    objects.append({"type": "hline", "price": float(price), "color": base_color, "lineStyle": "dashed", "lineWidth": 2})
+
+                for rr in _rules_list("invalidate_rules"):
+                    lvl = _resolve_rule_level(rr)
+                    if not lvl:
+                        continue
+                    k, price = lvl
+                    if (tag, "i", k) in used:
+                        continue
+                    used.add((tag, "i", k))
+                    objects.append({"type": "hline", "price": float(price), "color": "#f59e0b", "lineStyle": "dashed", "lineWidth": 2})
+
+                ts = _snapshot_ts()
+                pb = str(plan.get("playbook") or "")
+                st = str(plan.get("status") or "")
+                sig = str(plan.get("signal") or "")
+                pos = "belowBar" if sig.lower() == "buy" else "aboveBar"
+                objects.append({"type": "marker", "time": ts, "position": pos, "shape": "circle", "color": base_color, "text": f"{tag}:{sig}:{pb}:{st}"[:60]})
+
+            primary_color = "#3b82f6" if signal == "buy" else ("#ef4444" if signal == "sell" else "#94a3b8")
+            _add_playbook_overlay(analyzer_plan, tag="P", base_color=primary_color, fill_opacity=0.10)
+            alt = analyzer_plan.get("alternate_plan")
+            if isinstance(alt, dict):
+                _add_playbook_overlay(alt, tag="A", base_color="#94a3b8", fill_opacity=0.06)
             
             if objects:
                 ui_actions.append({"action": "draw_objects", "objects": objects})
