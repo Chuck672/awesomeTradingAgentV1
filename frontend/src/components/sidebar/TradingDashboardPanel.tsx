@@ -185,6 +185,14 @@ export function TradingDashboardPanel(props: { symbol?: string; timeframe?: stri
     const s = loadAgentSettingsRaw();
     return String(s?.configs?.analyzer?.api_key || "");
   });
+  const [coachBaseUrl, setCoachBaseUrl] = useState<string>(() => {
+    const s = loadAgentSettingsRaw();
+    return String(s?.configs?.analyzer?.base_url || "");
+  });
+  const [coachModel, setCoachModel] = useState<string>(() => {
+    const s = loadAgentSettingsRaw();
+    return String(s?.configs?.analyzer?.model || "");
+  });
 
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [statsBusy, setStatsBusy] = useState(false);
@@ -633,6 +641,26 @@ export function TradingDashboardPanel(props: { symbol?: string; timeframe?: stri
               placeholder="sk-..."
             />
           </label>
+          <label className="text-xs text-gray-700 dark:text-gray-300">
+            Base URL
+            <input
+              type="text"
+              className="mt-1 w-full px-2 py-2 rounded bg-gray-50 dark:bg-black/40 border border-gray-200 dark:border-white/10 text-gray-800 dark:text-white"
+              value={coachBaseUrl}
+              onChange={(e) => setCoachBaseUrl(e.target.value)}
+              placeholder="https://api.siliconflow.cn/v1"
+            />
+          </label>
+          <label className="text-xs text-gray-700 dark:text-gray-300">
+            Model
+            <input
+              type="text"
+              className="mt-1 w-full px-2 py-2 rounded bg-gray-50 dark:bg-black/40 border border-gray-200 dark:border-white/10 text-gray-800 dark:text-white"
+              value={coachModel}
+              onChange={(e) => setCoachModel(e.target.value)}
+              placeholder="Qwen/Qwen2.5-7B-Instruct"
+            />
+          </label>
           <div className="flex items-center gap-2 mt-2">
             <button
               type="button"
@@ -643,6 +671,8 @@ export function TradingDashboardPanel(props: { symbol?: string; timeframe?: stri
                 const cfgs = { ...(next.configs || {}) };
                 const analyzer = { ...(cfgs.analyzer || {}) };
                 analyzer.api_key = coachApiKey || "";
+                analyzer.base_url = coachBaseUrl || "";
+                analyzer.model = coachModel || "";
                 cfgs.analyzer = analyzer;
                 next.configs = cfgs;
                 saveAgentSettingsRaw(next);
