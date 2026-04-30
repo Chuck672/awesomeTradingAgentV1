@@ -831,6 +831,7 @@ class AlertDualAgentWorkflow:
             from backend.services.alerts_store import save_ai_report
 
             save_ai_report(alert_id, session_id, final_report)
+            _log_event("save_ai_report_done", {"report_len": int(len(final_report))})
         except Exception as e:
             logger.exception(
                 "event_dual save_ai_report_failed session=%s alert_id=%s err=%s", session_id, alert_id, str(e)
@@ -846,12 +847,16 @@ class AlertDualAgentWorkflow:
 
                 t_tg = time.perf_counter()
                 try:
-                    # Fire-and-forget: do not block the UI rendering
-                    asyncio.create_task(
-                        asyncio.to_thread(
-                            send_telegram_message, bot_token=token, chat_id=chat_id, text=final_report
-                        )
-                    )
+                    async def _tg_job() -> None:
+                        try:
+                            mid = await asyncio.to_thread(
+                                send_telegram_message, bot_token=token, chat_id=chat_id, text=final_report
+                            )
+                            _log_event("telegram_sent", {"message_id": str(mid or "")})
+                        except Exception as e2:
+                            _log_event("telegram_send_error", {"error": str(e2)})
+
+                    asyncio.create_task(_tg_job())
                 except Exception as e:
                     logger.exception(
                         "event_dual telegram_send_failed session=%s alert_id=%s err=%s",

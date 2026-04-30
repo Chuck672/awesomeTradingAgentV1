@@ -9,7 +9,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-def _split_telegram_text(text: str, max_len: int = 3500) -> list[str]:
+def _split_telegram_text(text: str, max_len: int) -> list[str]:
     t = str(text or "")
     if not t:
         return [""]
@@ -19,14 +19,21 @@ def _split_telegram_text(text: str, max_len: int = 3500) -> list[str]:
             parts.append(t)
             break
         cut = t.rfind("\n", 0, max_len)
-        if cut < 800:
+        if cut < int(max_len * 0.6):
             cut = max_len
         parts.append(t[:cut])
         t = t[cut:].lstrip("\n")
     return parts
 
 
-def send_telegram_message(*, bot_token: str, chat_id: str, text: str, timeout_sec: int = 15) -> Optional[str]:
+def send_telegram_message(
+    *,
+    bot_token: str,
+    chat_id: str,
+    text: str,
+    timeout_sec: int = 15,
+    max_len: int = 3800,
+) -> Optional[str]:
     """
     发送 Telegram 消息（MVP：不做重试/队列）。
     返回 message_id（若可解析）。
@@ -40,8 +47,10 @@ def send_telegram_message(*, bot_token: str, chat_id: str, text: str, timeout_se
     ctx = ssl.create_default_context()
 
     last_msg_id: Optional[str] = None
-    for idx, chunk in enumerate(_split_telegram_text(text, 3500)):
-        payload = {"chat_id": cid, "text": chunk, "parse_mode": "Markdown"}
+    chunks = _split_telegram_text(text, int(max_len))
+    for idx, chunk in enumerate(chunks, start=1):
+        prefix = f"[{idx}/{len(chunks)}]\n" if len(chunks) > 1 else ""
+        payload = {"chat_id": cid, "text": prefix + chunk, "parse_mode": "Markdown"}
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url, data=data, method="POST")
         req.add_header("Content-Type", "application/json")
