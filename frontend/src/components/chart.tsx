@@ -2409,9 +2409,11 @@ export function TradingChart() {
                     showIndB_EMA: false,
                     showIndB_BB: false,
                     showIndB_VWAP: false,
-                  showIndB_ATR: false,
-                  showIndB_Zigzag: false,
-                });
+                    showIndB_ATR: false,
+                    showIndB_Zigzag: false,
+                    showIndB_MSB_Zigzag: false,
+                    showIndB_TrendExhaustion: false,
+                  });
                 }
               }}
             >
