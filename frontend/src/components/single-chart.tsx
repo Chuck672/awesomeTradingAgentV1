@@ -2373,6 +2373,8 @@ export const SingleChart = forwardRef<ChartRef, SingleChartProps>(({
       const mapTime = (t: number) => {
         const target = Number(t);
         if (!Number.isFinite(target) || dataRef.current.length === 0) return null;
+        const last = Number(dataRef.current[dataRef.current.length - 1]?.time || 0);
+        if (last && target >= last) return target;
         let idx = 0;
         while (idx < dataRef.current.length && Number(dataRef.current[idx].time) <= target) idx++;
         idx = Math.max(0, idx - 1);

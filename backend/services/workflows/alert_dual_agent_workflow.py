@@ -747,52 +747,47 @@ class AlertDualAgentWorkflow:
             },
         )
 
-        analyzer_raw = ""
-        try:
-            raw_prompt = (
-                "你是资深交易分析师。请基于下面的事件触发与上下文，输出一份详细的中文策略报告。\n"
-                "你必须严格遵循 AnalyzerPlan(JSON) 的字段，不得编造计划外的价位。\n"
-                "若 AnalyzerPlan.status=wait 或 entry_type 为 null：不得输出具体 entry/sl/tp 数值；请围绕 entry_zone + confirm_rules + invalidate_rules + targets 讲清楚“等哪里、等什么、失效在哪、目标在哪”。\n"
-                "若 AnalyzerPlan.status=ready：必须复述 entry/sl/tp/rr 的数值并解释锚定依据；不得给出替代方案（例如 TP1/TP2）。\n"
-                "要求：必须引用输入 JSON 中的具体结构/指标/形态证据（例如 zone/break/bos/choch/pattern 的 id 与关键字段），并用因果链条说明结论。\n"
-                "输出使用 Markdown 分段：Trigger 解读/Regime/PRIMARY 剧本/ALTERNATE 剧本/执行步骤/失效条件。\n"
-                "执行步骤段必须把 confirm_rules/invalidate_rules 逐条解释为“图表上应该看到什么”。\n"
-            )
-            raw_msg = await asyncio.to_thread(
-                analyzer_llm.invoke,
-                [
-                    HumanMessage(
-                        content=(
-                            raw_prompt
-                            + "\n\nAnalyzerPlan(JSON):\n```json\n"
-                            + json.dumps(analyzer_plan or {}, ensure_ascii=False)
-                            + "\n```"
-                            + "\n\nDecision State JSON:\n```json\n"
-                            + json.dumps(decision_state, ensure_ascii=False)
-                            + "\n```"
-                            + "\n\n事件触发描述:\n"
-                            + str(trigger_text)
-                            + "\n\n上下文 JSON:\n```json\n"
-                            + context_json_for_prompt
-                            + "\n```"
-                        )
-                    )
-                ],
-            )
-            analyzer_raw = str(getattr(raw_msg, "content", "") or "").strip()
-            _log_event("analyzer_raw_done", {"raw_len": int(len(analyzer_raw))})
-        except Exception as e:
-            logger.exception("event_dual analyzer_raw_failed session=%s err=%s", session_id, str(e))
-            analyzer_raw = f"(analyzer_raw_failed) {str(e)}"
-            _log_event("analyzer_raw_failed", {"error": str(e)})
+        def _wait_summary_lines(plan: dict) -> list[str]:
+            if not isinstance(plan, dict):
+                return []
+            st = str(plan.get("status") or "").strip().lower()
+            if st != "wait":
+                return []
+            ez = plan.get("entry_zone")
+            if not isinstance(ez, dict):
+                return []
+            try:
+                b = float(ez.get("bottom")) if ez.get("bottom") is not None else None
+                t = float(ez.get("top")) if ez.get("top") is not None else None
+            except Exception:
+                b = None
+                t = None
+            if b is None or t is None:
+                return []
+            alt = plan.get("alternate_plan") if isinstance(plan.get("alternate_plan"), dict) else {}
+            sig_p = str(plan.get("signal") or "").strip().lower()
+            sig_a = str((alt or {}).get("signal") or "").strip().lower()
+            upper = "buy" if "buy" in (sig_p, sig_a) else ("sell" if "sell" in (sig_p, sig_a) else "hold")
+            lower = "sell" if "sell" in (sig_p, sig_a) else ("buy" if "buy" in (sig_p, sig_a) else "hold")
+            out = [
+                f"level-zone:({b:.3f} ~ {t:.3f})",
+            ]
+            if upper != "hold":
+                out.append(f"价格在 level-zone 以上尝试 {upper}")
+            if lower != "hold":
+                out.append(f"价格在 level-zone 以下尝试 {lower}")
+            return out
+
+        summary_lines = _wait_summary_lines(analyzer_plan or {})
+        if summary_lines:
+            report_lines.extend(summary_lines)
 
         report_lines.append("**AnalyzerPlan (JSON)**:")
         report_lines.append("```json")
         report_lines.append(analyzer_text)
         report_lines.append("```")
-        if analyzer_raw:
-            report_lines.append("**AnalyzerRaw (Full Reply)**:")
-            report_lines.append(analyzer_raw)
+
+        telegram_report = "\n\n".join(report_lines)
         await agent_comm.broadcast_status(session_id, "analyzer", "finished", analyzer_text)
 
         analyzer_plan_json = ""
@@ -825,19 +820,6 @@ class AlertDualAgentWorkflow:
             except Exception:
                 logger.exception("event_dual decision_state_update_failed session=%s alert_id=%s", session_id, alert_id)
 
-        final_report = "\n\n".join(report_lines)
-
-        try:
-            from backend.services.alerts_store import save_ai_report
-
-            save_ai_report(alert_id, session_id, final_report)
-            _log_event("save_ai_report_done", {"report_len": int(len(final_report))})
-        except Exception as e:
-            logger.exception(
-                "event_dual save_ai_report_failed session=%s alert_id=%s err=%s", session_id, alert_id, str(e)
-            )
-            _log_event("save_ai_report_failed", {"error": str(e)})
-
         telegram_ms = 0
         if telegram_config:
             token = telegram_config.get("token")
@@ -850,7 +832,7 @@ class AlertDualAgentWorkflow:
                     async def _tg_job() -> None:
                         try:
                             mid = await asyncio.to_thread(
-                                send_telegram_message, bot_token=token, chat_id=chat_id, text=final_report
+                                send_telegram_message, bot_token=token, chat_id=chat_id, text=telegram_report
                             )
                             _log_event("telegram_sent", {"message_id": str(mid or "")})
                         except Exception as e2:
@@ -1039,9 +1021,9 @@ class AlertDualAgentWorkflow:
                         ts = _snapshot_ts()
                         exec_tf = str((context.get("event") or {}).get("exec_tf") or timeframe)
                         tf_sec = _tf_to_seconds(exec_tf)
-                        extend_bars = 60
-                        from_time = ts - tf_sec * extend_bars
-                        to_time = ts
+                        future_bars = 30
+                        from_time = ts
+                        to_time = ts + tf_sec * future_bars
                         objects.append(
                             {
                                 "type": "box",
@@ -1133,10 +1115,82 @@ class AlertDualAgentWorkflow:
             len(ui_actions),
         )
         _log_event(
-            "workflow_end",
+            "executor_done",
             {
                 "executor_ms": int(executor_ms),
                 "ui_actions": int(len(ui_actions)),
+                "session_log_path": session_log_path,
+                "global_log_path": global_log_path,
+            },
+        )
+
+        analyzer_raw = ""
+        try:
+            raw_timeout_sec = int(os.environ.get("AWESOME_EVENT_DUAL_ANALYZER_RAW_TIMEOUT_SEC", "60") or "60")
+            _log_event("analyzer_raw_start", {"timeout_sec": raw_timeout_sec})
+            raw_prompt = (
+                "你是资深交易分析师。请基于下面的事件触发与上下文，输出一份详细的中文策略报告。\n"
+                "你必须严格遵循 AnalyzerPlan(JSON) 的字段，不得编造计划外的价位。\n"
+                "若 AnalyzerPlan.status=wait 或 entry_type 为 null：不得输出具体 entry/sl/tp 数值；请围绕 entry_zone + confirm_rules + invalidate_rules + targets 讲清楚“等哪里、等什么、失效在哪、目标在哪”。\n"
+                "若 AnalyzerPlan.status=ready：必须复述 entry/sl/tp/rr 的数值并解释锚定依据；不得给出替代方案（例如 TP1/TP2）。\n"
+                "要求：必须引用输入 JSON 中的具体结构/指标/形态证据（例如 zone/break/bos/choch/pattern 的 id 与关键字段），并用因果链条说明结论。\n"
+                "输出使用 Markdown 分段：Trigger 解读/Regime/PRIMARY 剧本/ALTERNATE 剧本/执行步骤/失效条件。\n"
+                "执行步骤段必须把 confirm_rules/invalidate_rules 逐条解释为“图表上应该看到什么”。\n"
+            )
+            raw_msg = await asyncio.wait_for(
+                asyncio.to_thread(
+                    analyzer_llm.invoke,
+                    [
+                        HumanMessage(
+                            content=(
+                                raw_prompt
+                                + "\n\nAnalyzerPlan(JSON):\n```json\n"
+                                + json.dumps(analyzer_plan or {}, ensure_ascii=False)
+                                + "\n```"
+                                + "\n\nDecision State JSON:\n```json\n"
+                                + json.dumps(decision_state, ensure_ascii=False)
+                                + "\n```"
+                                + "\n\n事件触发描述:\n"
+                                + str(trigger_text)
+                                + "\n\n上下文 JSON:\n```json\n"
+                                + context_json_for_prompt
+                                + "\n```"
+                            )
+                        )
+                    ],
+                ),
+                timeout=raw_timeout_sec,
+            )
+            analyzer_raw = str(getattr(raw_msg, "content", "") or "").strip()
+            _log_event("analyzer_raw_done", {"raw_len": int(len(analyzer_raw))})
+        except asyncio.TimeoutError:
+            analyzer_raw = "(analyzer_raw_timeout)"
+            _log_event("analyzer_raw_timeout", {})
+        except Exception as e:
+            logger.exception("event_dual analyzer_raw_failed session=%s err=%s", session_id, str(e))
+            analyzer_raw = f"(analyzer_raw_failed) {str(e)}"
+            _log_event("analyzer_raw_failed", {"error": str(e)})
+
+        if analyzer_raw:
+            report_lines.append("**AnalyzerRaw (Full Reply)**:")
+            report_lines.append(analyzer_raw)
+
+        final_report = "\n\n".join(report_lines)
+        try:
+            from backend.services.alerts_store import save_ai_report
+
+            save_ai_report(alert_id, session_id, final_report)
+            _log_event("save_ai_report_done", {"report_len": int(len(final_report))})
+        except Exception as e:
+            logger.exception(
+                "event_dual save_ai_report_failed session=%s alert_id=%s err=%s", session_id, alert_id, str(e)
+            )
+            _log_event("save_ai_report_failed", {"error": str(e)})
+
+        _log_event(
+            "workflow_end",
+            {
+                "report_len": int(len(final_report)),
                 "session_log_path": session_log_path,
                 "global_log_path": global_log_path,
             },
