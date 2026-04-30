@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 
 from langchain_core.messages import HumanMessage
@@ -37,6 +38,47 @@ class AlertDualAgentWorkflow:
     ) -> str:
         report_lines: list[str] = [f"🚨 **Trigger Event**: {initial_message}"]
 
+        from backend.database.app_config import app_config
+
+        base_dir = app_config.get_base_dir()
+        log_dir = os.path.join(base_dir, "logs", "event_dual")
+        os.makedirs(log_dir, exist_ok=True)
+        session_log_path = os.path.join(log_dir, f"{session_id}.jsonl")
+        global_log_path = os.path.join(log_dir, "event_dual.jsonl")
+
+        def _log_event(event: str, data: dict | None = None) -> None:
+            payload = {
+                "ts": int(time.time()),
+                "event": str(event),
+                "session_id": session_id,
+                "alert_id": int(alert_id),
+                "symbol": str(symbol),
+                "timeframe": str(timeframe),
+                "trigger_type": str(trigger_type),
+            }
+            if isinstance(data, dict) and data:
+                payload.update(data)
+            line = json.dumps(payload, ensure_ascii=False)
+            try:
+                with open(session_log_path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except Exception:
+                pass
+            try:
+                with open(global_log_path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except Exception:
+                pass
+
+        _log_event(
+            "workflow_start",
+            {
+                "initial_message_len": len(str(initial_message or "")),
+                "trigger_text_len": len(str(trigger_text or "")),
+                "telegram_configured": bool(telegram_config and telegram_config.get("token") and telegram_config.get("chat_id")),
+            },
+        )
+
         await agent_comm.broadcast_status(session_id, "analyzer", "thinking", "Building event context...")
         t0 = time.perf_counter()
         from backend.services.ai.event_context_builder import build_event_context
@@ -62,6 +104,14 @@ class AlertDualAgentWorkflow:
             t_context_ms,
             len(context_json.encode("utf-8")),
             len(context.get("missing_indicators") or []),
+        )
+        _log_event(
+            "context_built",
+            {
+                "context_ms": int(t_context_ms),
+                "context_bytes": int(len(context_json.encode("utf-8"))),
+                "missing": list(context.get("missing_indicators") or []),
+            },
         )
 
         def _extract_json_object(text: str) -> dict | None:
@@ -360,30 +410,42 @@ class AlertDualAgentWorkflow:
         compact_context = _compact_context_for_analyzer(trigger_family)
         context_json_for_prompt = json.dumps(compact_context, ensure_ascii=False)
         analyzer_prompt_final = analyzer_prompt + "\n" + _trigger_guidance(trigger_family)
+        _log_event(
+            "analyzer_prompt_ready",
+            {
+                "trigger_family": str(trigger_family),
+                "compact_context_bytes": int(len(context_json_for_prompt.encode("utf-8"))),
+            },
+        )
 
         try:
             # 引入 Structured Output 强制约束输出格式，杜绝解析异常
             structured_llm = analyzer_llm.with_structured_output(AnalyzerPlan)
-            msg = await asyncio.to_thread(
-                structured_llm.invoke,
-                [
-                    HumanMessage(
-                        content=(
-                            analyzer_prompt_final
-                            + "\n\nDecision State JSON:\n```json\n"
-                            + json.dumps(
-                                decision_state,
-                                ensure_ascii=False,
+            analyzer_timeout_sec = int(os.environ.get("AWESOME_EVENT_DUAL_ANALYZER_TIMEOUT_SEC", "90") or "90")
+            _log_event("analyzer_invoke_start", {"timeout_sec": analyzer_timeout_sec})
+            msg = await asyncio.wait_for(
+                asyncio.to_thread(
+                    structured_llm.invoke,
+                    [
+                        HumanMessage(
+                            content=(
+                                analyzer_prompt_final
+                                + "\n\nDecision State JSON:\n```json\n"
+                                + json.dumps(
+                                    decision_state,
+                                    ensure_ascii=False,
+                                )
+                                + "\n```"
+                                + "\n\n事件触发描述:\n"
+                                + str(trigger_text)
+                                + "\n\n上下文 JSON:\n```json\n"
+                                + context_json_for_prompt
+                                + "\n```"
                             )
-                            + "\n```"
-                            + "\n\n事件触发描述:\n"
-                            + str(trigger_text)
-                            + "\n\n上下文 JSON:\n```json\n"
-                            + context_json_for_prompt
-                            + "\n```"
                         )
-                    )
-                ],
+                    ],
+                ),
+                timeout=analyzer_timeout_sec,
             )
             analyzer_ms = int((time.perf_counter() - t1) * 1000)
             
@@ -394,11 +456,24 @@ class AlertDualAgentWorkflow:
             else:
                 analyzer_plan = {}
                 analyzer_text = "{}"
+            _log_event(
+                "analyzer_invoke_done",
+                {
+                    "analyzer_ms": int(analyzer_ms),
+                    "analyzer_text_bytes": int(len(analyzer_text.encode("utf-8"))),
+                },
+            )
+        except asyncio.TimeoutError:
+            analyzer_ms = int((time.perf_counter() - t1) * 1000)
+            analyzer_plan = {}
+            analyzer_text = "{\"error\": \"analyzer_timeout\"}"
+            _log_event("analyzer_timeout", {"analyzer_ms": int(analyzer_ms)})
         except Exception as e:
             logger.exception("event_dual analyzer_structured_output_failed session=%s err=%s", session_id, str(e))
             analyzer_ms = int((time.perf_counter() - t1) * 1000)
             analyzer_plan = {}
             analyzer_text = f"{{\"error\": \"{str(e)}\"}}"
+            _log_event("analyzer_structured_output_failed", {"analyzer_ms": int(analyzer_ms), "error": str(e)})
 
         def _fill_take_profit(plan: dict) -> dict:
             if not isinstance(plan, dict):
@@ -663,6 +738,14 @@ class AlertDualAgentWorkflow:
             analyzer_text = json.dumps(analyzer_plan, ensure_ascii=False, indent=2) if analyzer_plan else analyzer_text
         except Exception:
             pass
+        _log_event(
+            "analyzer_plan_final",
+            {
+                "signal": str((analyzer_plan or {}).get("signal") or ""),
+                "status": str((analyzer_plan or {}).get("status") or ""),
+                "playbook": str((analyzer_plan or {}).get("playbook") or ""),
+            },
+        )
 
         analyzer_raw = ""
         try:
@@ -697,9 +780,11 @@ class AlertDualAgentWorkflow:
                 ],
             )
             analyzer_raw = str(getattr(raw_msg, "content", "") or "").strip()
+            _log_event("analyzer_raw_done", {"raw_len": int(len(analyzer_raw))})
         except Exception as e:
             logger.exception("event_dual analyzer_raw_failed session=%s err=%s", session_id, str(e))
             analyzer_raw = f"(analyzer_raw_failed) {str(e)}"
+            _log_event("analyzer_raw_failed", {"error": str(e)})
 
         report_lines.append("**AnalyzerPlan (JSON)**:")
         report_lines.append("```json")
@@ -750,6 +835,7 @@ class AlertDualAgentWorkflow:
             logger.exception(
                 "event_dual save_ai_report_failed session=%s alert_id=%s err=%s", session_id, alert_id, str(e)
             )
+            _log_event("save_ai_report_failed", {"error": str(e)})
 
         telegram_ms = 0
         if telegram_config:
@@ -773,7 +859,11 @@ class AlertDualAgentWorkflow:
                         alert_id,
                         str(e),
                     )
+                    _log_event("telegram_send_failed", {"error": str(e)})
                 telegram_ms = int((time.perf_counter() - t_tg) * 1000)
+                _log_event("telegram_scheduled", {"telegram_ms": int(telegram_ms)})
+        else:
+            _log_event("telegram_skipped", {"reason": "telegram_config_missing"})
 
         logger.info(
             "event_dual analyzer_done session=%s alert_id=%s symbol=%s tf=%s context_ms=%s analyzer_ms=%s telegram_ms=%s",
@@ -784,6 +874,14 @@ class AlertDualAgentWorkflow:
             t_context_ms,
             analyzer_ms,
             telegram_ms,
+        )
+        _log_event(
+            "workflow_after_analyzer",
+            {
+                "context_ms": int(t_context_ms),
+                "analyzer_ms": int(analyzer_ms),
+                "telegram_ms": int(telegram_ms),
+            },
         )
 
         # 废除 Executor LLM，改用纯代码映射
@@ -1028,6 +1126,15 @@ class AlertDualAgentWorkflow:
             timeframe,
             executor_ms,
             len(ui_actions),
+        )
+        _log_event(
+            "workflow_end",
+            {
+                "executor_ms": int(executor_ms),
+                "ui_actions": int(len(ui_actions)),
+                "session_log_path": session_log_path,
+                "global_log_path": global_log_path,
+            },
         )
 
         return final_report
