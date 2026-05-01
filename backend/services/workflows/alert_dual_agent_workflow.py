@@ -214,22 +214,52 @@ class AlertDualAgentWorkflow:
             bottom = None
             top = None
             tf = str((context.get("event") or {}).get("exec_tf") or timeframe)
+            extra = ""
             if isinstance(anchor, dict):
                 if family == "raja_sr":
                     ref = str(anchor.get("zone_id") or "")
                     bottom = anchor.get("bottom")
                     top = anchor.get("top")
                     tf = str(anchor.get("timeframe") or tf)
+                    extra = "|".join(
+                        str(x)
+                        for x in [
+                            f"type={anchor.get('zone_type')}",
+                            f"touches={anchor.get('touches')}",
+                            f"score={anchor.get('score')}",
+                            f"age={anchor.get('age_candles')}",
+                            f"last_touch={anchor.get('last_touch_time_iso')}",
+                        ]
+                        if x is not None
+                    )
                 if family == "consolidation_rectangle":
                     ref = str(anchor.get("rect_id") or "")
                     bottom = anchor.get("bottom")
                     top = anchor.get("top")
                     tf = str(anchor.get("timeframe") or tf)
+                    extra = "|".join(
+                        str(x)
+                        for x in [
+                            f"touches_top={anchor.get('touches_top')}",
+                            f"touches_bottom={anchor.get('touches_bottom')}",
+                            f"containment={anchor.get('containment')}",
+                            f"height_atr={anchor.get('height_atr')}",
+                        ]
+                        if x is not None
+                    )
                 if family == "trend_exhaustion":
                     ref = str(anchor.get("te_id") or "")
                     bottom = anchor.get("box_low")
                     top = anchor.get("box_high")
                     tf = str(anchor.get("timeframe") or tf)
+                    extra = "|".join(
+                        str(x)
+                        for x in [
+                            f"direction={anchor.get('te_direction') or anchor.get('direction')}",
+                            f"time={anchor.get('trigger_time_iso')}",
+                        ]
+                        if x is not None
+                    )
             tg: list[float] = []
             try:
                 if bottom is not None and float(bottom) > 0:
@@ -241,12 +271,25 @@ class AlertDualAgentWorkflow:
                     tg.append(float(top))
             except Exception:
                 pass
+            zone_obj = None
+            try:
+                if bottom is not None and top is not None and float(bottom) > 0 and float(top) > 0:
+                    zone_obj = {"ref": ref or "no_trade", "bottom": float(bottom), "top": float(top), "timeframe": tf}
+            except Exception:
+                zone_obj = None
+
+            note = f"no_trade: {reason}"
+            if extra:
+                note = note + f" ({extra})"
+            if zone_obj:
+                note = note + f" | level=({zone_obj['bottom']}~{zone_obj['top']})"
+
             plan = {
                 "signal": "hold",
                 "playbook": "no_trade",
                 "status": "wait",
                 "entry_type": None,
-                "entry_zone": {"ref": ref or "no_trade", "bottom": float(bottom or 0.0), "top": float(top or 0.0), "timeframe": tf} if bottom and top else None,
+                "entry_zone": zone_obj,
                 "entry_price": None,
                 "stop_loss": None,
                 "take_profit": None,
@@ -255,7 +298,7 @@ class AlertDualAgentWorkflow:
                 "invalidate_rules": [],
                 "evidence_refs": [ref] if ref else [],
                 "targets": tg if tg else None,
-                "confidence_note": f"no_trade: {reason}",
+                "confidence_note": note,
                 "regime": None,
                 "invalidation_condition": reason,
                 "trade_horizon": str((context.get("event") or {}).get("exec_tf") or timeframe),
@@ -290,18 +333,35 @@ class AlertDualAgentWorkflow:
             + "- 若违反 allowed_playbooks 或 anchor 约束：输出 playbook=no_trade，并给 targets（至少包含 anchor top/bottom 或 TE box_high/low）。\n"
             + "- confirm_rules/invalidate_rules 禁止 retest_ok/event_exists，只能使用 zone/rectangle/Structure/te.box 这类可落图原子规则。\n"
         )
-        
-        class AnalyzerPlan(BaseModel):
-            signal: str = Field(description="Trading signal: buy, sell, or hold")
-            confidence: float = Field(description="Confidence score of the signal, 0.0 to 100.0")
-            entry_type: Optional[str] = Field(None, description="Type of entry: market, limit, or stop")
-            entry_price: Optional[float] = Field(None, description="Suggested entry price level")
-            stop_loss: Optional[float] = Field(None, description="Suggested stop loss price level")
-            take_profit: Optional[float] = Field(None, description="Suggested take profit price level")
-            risk_reward_ratio: Optional[float] = Field(None, description="Risk to reward ratio")
-            evidence_refs: Optional[List[str]] = Field(None, description="List of evidence references")
-            invalidation_condition: Optional[str] = Field(None, description="Condition that invalidates the trade")
-            trade_horizon: Optional[str] = Field(None, description="Expected time horizon for the trade")
+
+        class EntryZone(BaseModel):
+            ref: str = Field(description="Anchor id: zone_id / rect_id / te_id")
+            bottom: float = Field(description="Bottom price of the zone/box")
+            top: float = Field(description="Top price of the zone/box")
+            timeframe: str = Field(description="Timeframe of the anchor")
+
+        class PlaybookPlan(BaseModel):
+            signal: str = Field(description="buy/sell/hold")
+            playbook: str = Field(description="Execution playbook id")
+            status: str = Field(description="wait/ready")
+            entry_type: Optional[str] = Field(None, description="market/limit/stop (ready only)")
+            entry_zone: Optional[EntryZone] = Field(None, description="Waiting zone/box")
+            entry_price: Optional[float] = Field(None, description="Entry price (ready only)")
+            stop_loss: Optional[float] = Field(None, description="Stop loss (ready only)")
+            take_profit: Optional[float] = Field(None, description="Take profit (ready only)")
+            risk_reward_ratio: Optional[float] = Field(None, description="RR (ready only)")
+            confirm_rules: Optional[List[str]] = Field(None, description="Atomic confirm rules")
+            invalidate_rules: Optional[List[str]] = Field(None, description="Atomic invalidation rules")
+            evidence_refs: Optional[List[str]] = Field(None, description="Evidence ids")
+            targets: Optional[List[float]] = Field(None, description="Target price levels for visualization")
+
+        class AnalyzerPlan(PlaybookPlan):
+            confidence: Optional[float] = Field(None, description="Confidence score 0..100")
+            confidence_note: str = Field(description="Concise reasoning and execution notes")
+            regime: Optional[str] = Field(None, description="Optional regime label (explain-only)")
+            invalidation_condition: Optional[str] = Field(None, description="Global invalidation condition")
+            trade_horizon: Optional[str] = Field(None, description="Expected time horizon")
+            alternate_plan: Optional[PlaybookPlan] = Field(None, description="Alternate mutually-exclusive plan")
 
         try:
             structured_llm = analyzer_llm.with_structured_output(AnalyzerPlan)
@@ -349,6 +409,8 @@ class AlertDualAgentWorkflow:
             if not isinstance(plan, dict):
                 return _make_no_trade("invalid_plan_type", family=family)
             pb = str(plan.get("playbook") or "")
+            if not pb:
+                return _make_no_trade("missing_playbook", family=family)
             if pb not in allowed:
                 return _make_no_trade(f"playbook_not_allowed:{pb}", family=family)
             if family == "raja_sr" and pb in ("range_mean_reversion", "range_breakout_confirmed"):
