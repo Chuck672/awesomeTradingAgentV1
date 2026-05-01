@@ -22,6 +22,7 @@ def _build_event_context_uncached(
     event_id: str,
     trigger_type: str,
     trigger_text: str,
+    trigger_payload: Dict[str, Any] | None,
     symbol: str,
     event_timeframe: str,
     history_limits: Dict[str, int] | None = None,
@@ -260,22 +261,6 @@ def _build_event_context_uncached(
             market["indicators"][tf] = {"error": "context_parse_failed"}
             return
 
-        swing_points = []
-        try:
-            from backend.domain.market.structure.swings import detect_swings
-
-            sw = detect_swings(bars_full, left=2, right=2, max_points=10)
-            for s in sw[-10:]:
-                try:
-                    t = int(getattr(s, "time", 0) or 0)
-                    price = float(getattr(s, "price", 0.0) or 0.0)
-                    kind = str(getattr(s, "kind", "") or "")
-                    swing_points.append({"kind": kind, "price": price, "time_iso": _ts_to_iso(t), "age_candles": _age_candles(t)})
-                except Exception:
-                    continue
-        except Exception:
-            swing_points = []
-
         try:
             zones_all = calc_raja_sr(bars_full)
         except Exception:
@@ -347,6 +332,43 @@ def _build_event_context_uncached(
             below_sorted = [x[1] for x in sorted(below, key=lambda t: t[0])][:3]
             active_zones = above_sorted + below_sorted
 
+        if str(trigger_type or "") == "raja_sr_touch" and isinstance(trigger_payload, dict):
+            be = trigger_payload.get("best_event")
+            ev = be if isinstance(be, dict) else None
+            e = (ev or {}).get("evidence") if isinstance((ev or {}).get("evidence"), dict) else None
+            zone_id = str((e or {}).get("zone_id") or "")
+            if zone_id and str((ev or {}).get("timeframe") or "") == tf:
+                found = False
+                for it in active_zones:
+                    if isinstance(it, dict) and str(it.get("evidence_id") or "") == zone_id:
+                        it["is_trigger_zone"] = True
+                        found = True
+                        break
+                if not found:
+                    try:
+                        bottom = float((e or {}).get("bottom"))
+                        top = float((e or {}).get("top"))
+                    except Exception:
+                        bottom = None
+                        top = None
+                    if bottom is not None and top is not None and bottom > 0 and top > 0:
+                        mid = (bottom + top) / 2.0
+                        dist = float(abs(mid - p)) if p is not None else None
+                        item = {
+                            "evidence_id": zone_id,
+                            "type": (e or {}).get("zone_type"),
+                            "level_zone_bottom_edge_price": bottom,
+                            "level_zone_top_edge_price": top,
+                            "score": (e or {}).get("score"),
+                            "touches": (e or {}).get("touches"),
+                            "last_touch_time_iso": (e or {}).get("last_touch_time_iso"),
+                            "last_touch_age_candles": (e or {}).get("age_candles"),
+                            "distance_to_price_points": dist,
+                            "distance_pct": float(abs(mid - p) / p) if p else None,
+                            "is_trigger_zone": True,
+                        }
+                        active_zones = [item] + active_zones
+
         recent_breaks: list[dict] = []
         if isinstance(msb, dict):
             lines = msb.get("lines")
@@ -377,8 +399,6 @@ def _build_event_context_uncached(
         adv = context.get("advanced_indicators") or {}
         if isinstance(adv, dict):
             adv = {k: v for k, v in adv.items() if k not in ("Nearest_Resistance", "Nearest_Support", "Recent_Structure_Breaks")}
-            if swing_points:
-                adv["Swing_Points"] = swing_points[-10:]
 
         market["indicators"][tf] = {
             "current_price": current_price,
@@ -556,9 +576,51 @@ def _build_event_context_uncached(
             )
             items = rep.get("items") if isinstance(rep, dict) else None
             rects = items if isinstance(items, list) else []
+            curr_p = None
+            try:
+                q = quote if isinstance(quote, dict) else {}
+                curr_p = float(q.get("last")) if q and q.get("last") is not None else None
+            except Exception:
+                curr_p = None
+            if curr_p is None:
+                try:
+                    last_bar = bars_for_features[-1] if isinstance(bars_for_features, list) and bars_for_features else None
+                    curr_p = float((last_bar or {}).get("close")) if isinstance(last_bar, dict) and (last_bar or {}).get("close") is not None else None
+                except Exception:
+                    curr_p = None
             for it in rects:
                 if isinstance(it, dict):
                     it["timeframe"] = feature_tf
+                    try:
+                        top = float(it.get("top"))
+                        bottom = float(it.get("bottom"))
+                    except Exception:
+                        top = None
+                        bottom = None
+                    top_r = round(top, 3) if isinstance(top, float) else top
+                    bottom_r = round(bottom, 3) if isinstance(bottom, float) else bottom
+                    raw = "|".join(
+                        str(x)
+                        for x in [
+                            int(it.get("from_time") or 0),
+                            int(it.get("to_time") or 0),
+                            top_r,
+                            bottom_r,
+                            int(it.get("touches_top") or 0),
+                            int(it.get("touches_bottom") or 0),
+                        ]
+                    )
+                    it["rect_id"] = f"rect_{feature_tf}_{_hashlib.sha1(raw.encode('utf-8')).hexdigest()[:10]}"
+                    if top is not None and bottom is not None and curr_p is not None:
+                        it["is_price_inside"] = bool(bottom <= curr_p <= top)
+                        it["distance_to_price_points"] = 0.0 if (bottom <= curr_p <= top) else float(abs(((bottom + top) / 2.0) - curr_p))
+                    if isinstance(trigger_payload, dict):
+                        be = trigger_payload.get("best_event")
+                        ev = be if isinstance(be, dict) else None
+                        if isinstance(ev, dict) and str(ev.get("type") or "") == "consolidation_rectangle_breakout":
+                            e = ev.get("evidence") if isinstance(ev.get("evidence"), dict) else None
+                            if isinstance(e, dict) and str(e.get("rect_id") or "") == str(it.get("rect_id") or ""):
+                                it["is_trigger_rectangle"] = True
             market["patterns"][feature_tf] = market.get("patterns", {}).get(feature_tf, {})
             if isinstance(market["patterns"][feature_tf], dict):
                 market["patterns"][feature_tf]["rectangle_ranges"] = rects
@@ -858,11 +920,33 @@ def _build_event_context_uncached(
         "session_vp": "Session Volume Profile：当前与前一 session 的 POC/VAH/VAL 摘要。",
     }
 
+    trigger_zone = None
+    trigger_rectangle = None
+    trigger_te = None
+    if isinstance(trigger_payload, dict):
+        be = trigger_payload.get("best_event")
+        if isinstance(be, dict):
+            et = str(be.get("type") or "")
+            e = be.get("evidence") if isinstance(be.get("evidence"), dict) else None
+            if et == "raja_sr_touch" and isinstance(e, dict):
+                trigger_zone = dict(e)
+                trigger_zone["timeframe"] = be.get("timeframe")
+            if et == "consolidation_rectangle_breakout" and isinstance(e, dict):
+                trigger_rectangle = dict(e)
+                trigger_rectangle["timeframe"] = be.get("timeframe")
+            if et == "trend_exhaustion" and isinstance(e, dict):
+                trigger_te = dict(e)
+                trigger_te["timeframe"] = be.get("timeframe")
+
     payload = {
         "event": {
             "event_id": event_id,
             "trigger_type": trigger_type,
             "trigger_text": trigger_text,
+            "trigger_payload": trigger_payload,
+            "trigger_zone": trigger_zone,
+            "trigger_rectangle": trigger_rectangle,
+            "trigger_te": trigger_te,
             "symbol": symbol,
             "timeframe": event_timeframe,
             "snapshot_time_iso": _ts_to_iso(snapshot_time),
@@ -936,6 +1020,7 @@ def build_event_context(
     event_id: str,
     trigger_type: str,
     trigger_text: str,
+    trigger_payload: Dict[str, Any] | None = None,
     symbol: str,
     event_timeframe: str,
     history_limits: Dict[str, int] | None = None,
@@ -962,6 +1047,7 @@ def build_event_context(
         tuple(sorted((compute_limits or {}).items())),
         tuple(sorted((ohlcv_payload_limits or {}).items())),
         json.dumps((configs or {}).get("context_features") or {}, sort_keys=True, ensure_ascii=False),
+        json.dumps(trigger_payload or {}, sort_keys=True, ensure_ascii=False),
     )
 
     now = time.time()
@@ -977,6 +1063,7 @@ def build_event_context(
                     ev["event_id"] = event_id
                     ev["trigger_type"] = trigger_type
                     ev["trigger_text"] = trigger_text
+                    ev["trigger_payload"] = trigger_payload
                     ev["symbol"] = symbol
                     ev["timeframe"] = event_timeframe
                 return payload
@@ -986,6 +1073,7 @@ def build_event_context(
         event_id=event_id,
         trigger_type=trigger_type,
         trigger_text=trigger_text,
+        trigger_payload=trigger_payload,
         symbol=symbol,
         event_timeframe=event_timeframe,
         history_limits=history_limits,

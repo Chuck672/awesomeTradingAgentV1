@@ -47,20 +47,22 @@ from backend.services.workflows.alert_dual_agent_workflow import AlertDualAgentW
 import uuid
 import hashlib
 
+TriggerResult = Dict[str, Any]
+
 def _get_active_symbols() -> List[str]:
     # A helper to get actively tracked symbols. For simplicity, we can fetch from meta_store.
     from backend.services.ingestion import ingestion_service
     # If ingestion_service isn't fully tracking it this way, we can also query the DB
     return ["EURUSD"] # Fallback or dynamic fetch
 
-def eval_raja_sr_touch(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[str]:
+def eval_raja_sr_touch(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[TriggerResult]:
     det = {"feature_id": "raja_sr_touch", "timeframe": rule.get("timeframe"), "params": {"limit": 400, "max_zones": 5}}
     rule2 = dict(rule)
     rule2["type"] = "detector_trigger"
     rule2["trigger_detectors"] = [det]
     return eval_detector_trigger(rule2, state, global_cache_bars, global_cache_struct)
 
-def eval_msb_zigzag_break(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[str]:
+def eval_msb_zigzag_break(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[TriggerResult]:
     det = {
         "feature_id": "msb_zigzag_break",
         "timeframe": rule.get("timeframe"),
@@ -71,22 +73,24 @@ def eval_msb_zigzag_break(rule: Dict[str, Any], state: Dict[str, Any], global_ca
     rule2["trigger_detectors"] = [det]
     return eval_detector_trigger(rule2, state, global_cache_bars, global_cache_struct)
 
-def eval_trend_exhaustion(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[str]:
+def eval_trend_exhaustion(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[TriggerResult]:
     det = {"feature_id": "trend_exhaustion", "timeframe": rule.get("timeframe"), "params": {"limit": 400}}
     rule2 = dict(rule)
     rule2["type"] = "detector_trigger"
     rule2["trigger_detectors"] = [det]
     return eval_detector_trigger(rule2, state, global_cache_bars, global_cache_struct)
 
-def eval_rectangle_breakout(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[str]:
+
+def eval_consolidation_rectangle_breakout(
+    rule: Dict[str, Any],
+    state: Dict[str, Any],
+    global_cache_bars: Dict[str, List[Dict[str, Any]]],
+    global_cache_struct: Dict[str, Dict[str, Any]],
+) -> Optional[TriggerResult]:
     det = {
-        "feature_id": "rectangle_breakout",
+        "feature_id": "consolidation_rectangle_breakout",
         "timeframe": rule.get("timeframe"),
-        "params": {
-            "lookback_bars": _safe_int(rule.get("lookback_bars", 220)),
-            "min_touches_per_side": _safe_int(rule.get("min_touches_per_side", 2)),
-            "tolerance_atr_mult": float(rule.get("tolerance_atr_mult", 0.25)),
-        },
+        "params": {"lookback_bars": 160, "min_touches_per_side": 3, "emit": "best"},
     }
     rule2 = dict(rule)
     rule2["type"] = "detector_trigger"
@@ -98,7 +102,7 @@ def _mk_sig(parts: List[Any]) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def eval_detector_trigger(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[str]:
+def eval_detector_trigger(rule: Dict[str, Any], state: Dict[str, Any], global_cache_bars: Dict[str, List[Dict[str, Any]]], global_cache_struct: Dict[str, Dict[str, Any]]) -> Optional[TriggerResult]:
     symbol = str(rule.get("symbol") or "").strip()
     default_tf = str(rule.get("timeframe") or "").strip()
     if not symbol or not default_tf:
@@ -202,18 +206,70 @@ def eval_detector_trigger(rule: Dict[str, Any], state: Dict[str, Any], global_ca
                 continue
             last_close = _safe_float((bars[-1] or {}).get("close"))
             zones = calc_raja_sr(bars, max_zones=int(max_zones))
+
+            def _ts_to_iso(ts: int | None) -> str | None:
+                if ts is None:
+                    return None
+                try:
+                    return dt.datetime.fromtimestamp(int(ts), tz=dt.timezone.utc).isoformat().replace("+00:00", "Z")
+                except Exception:
+                    return None
+
+            times = [int(b.get("time")) for b in bars if b.get("time") is not None]
+            time_to_idx = {t: i for i, t in enumerate(times)}
+
+            def _age_candles(ts: int | None) -> int | None:
+                if ts is None:
+                    return None
+                try:
+                    t = int(ts)
+                except Exception:
+                    return None
+                idx = time_to_idx.get(t)
+                if idx is None:
+                    try:
+                        idx = max(i for i, x in enumerate(times) if x <= t)
+                    except Exception:
+                        return None
+                return int((len(times) - 1) - idx)
+
+            def _mk_zone_id(zone_type: str | None, bottom: float | None, top: float | None, touches: int | None, last_touch_iso: str | None) -> str:
+                b = round(float(bottom or 0.0), 3) if bottom is not None else None
+                t = round(float(top or 0.0), 3) if top is not None else None
+                raw = "|".join("" if p is None else str(p) for p in [zone_type, b, t, touches, last_touch_iso])
+                h = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+                return f"zone_{tf}_{h}"
+
             for z in zones if isinstance(zones, list) else []:
                 if not isinstance(z, dict):
                     continue
                 try:
                     if float(z.get("bottom")) <= float(last_close) <= float(z.get("top")):
+                        lt = _safe_int(z.get("last_touch_time"), 0) or None
+                        lt_iso = _ts_to_iso(lt)
+                        touches = _safe_int(z.get("touches"), 0) or None
+                        bottom = float(z.get("bottom")) if z.get("bottom") is not None else None
+                        top = float(z.get("top")) if z.get("top") is not None else None
+                        zone_id = _mk_zone_id(str(z.get("type") or ""), bottom, top, touches, lt_iso)
                         ev = {
                             "id": "raja_sr_touch",
                             "type": "raja_sr_touch",
                             "direction": "Bearish" if str(z.get("type") or "").lower() == "resistance" else "Bullish",
                             "strength": "Medium",
                             "score": 75.0,
-                            "evidence": {"zone_type": z.get("type"), "bottom": z.get("bottom"), "top": z.get("top"), "close": last_close, "bar_time": _safe_int((bars[-1] or {}).get("time"))},
+                            "evidence": {
+                                "zone_id": zone_id,
+                                "zone_type": z.get("type"),
+                                "bottom": bottom,
+                                "top": top,
+                                "touches": touches,
+                                "score": _safe_float(z.get("score"), 0.0),
+                                "last_touch_time": lt,
+                                "last_touch_time_iso": lt_iso,
+                                "age_candles": _age_candles(lt),
+                                "trigger_price": last_close,
+                                "bar_time": _safe_int((bars[-1] or {}).get("time")),
+                            },
                         }
                         ev["timeframe"] = tf
                         events.append(ev)
@@ -270,10 +326,82 @@ def eval_detector_trigger(rule: Dict[str, Any], state: Dict[str, Any], global_ca
                     "direction": "Bearish" if ob_reversal else "Bullish",
                     "strength": "Medium",
                     "score": 78.0,
-                    "evidence": {"bar_time": last_t, "close": _safe_float(last_bar.get("close")), "ob_reversal": ob_reversal, "os_reversal": os_reversal},
+                    "evidence": {
+                        "te_id": (te or {}).get("te_id"),
+                        "te_direction": (te or {}).get("direction"),
+                        "box_high": (te or {}).get("box_high"),
+                        "box_low": (te or {}).get("box_low"),
+                        "trigger_time": (te or {}).get("trigger_time") or last_t,
+                        "trigger_time_iso": (te or {}).get("trigger_time_iso"),
+                        "bar_time": last_t,
+                        "close": _safe_float(last_bar.get("close")),
+                        "ob_reversal": ob_reversal,
+                        "os_reversal": os_reversal,
+                    },
                     "timeframe": tf,
                 }
                 events.append(ev)
+
+        elif fid == "consolidation_rectangle_breakout":
+            rep = detect_rectangle_ranges(
+                bars,
+                lookback_bars=int(prm.get("lookback_bars", 160)),
+                min_touches_per_side=int(prm.get("min_touches_per_side", 3)),
+                tolerance_atr_mult=float(prm.get("tolerance_atr_mult", 0.25)),
+                min_containment=float(prm.get("min_containment", 0.80)),
+                max_height_atr=float(prm.get("max_height_atr", 8.0)),
+                max_drift_atr=float(prm.get("max_drift_atr", 3.0)),
+                max_efficiency=float(prm.get("max_efficiency", 0.45)),
+                emit=str(prm.get("emit", "best") or "best"),
+                max_results=int(prm.get("max_results", 50)),
+                distinct_no_overlap=bool(prm.get("distinct_no_overlap", True)),
+                dedup_iou=float(prm.get("dedup_iou", 0.55)),
+            )
+            items = rep.get("items") if isinstance(rep, dict) else None
+            it0 = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else None
+            if isinstance(it0, dict):
+                last_bar = bars[-1] or {}
+                last_close = _safe_float(last_bar.get("close"))
+                top = _safe_float(it0.get("top"))
+                bottom = _safe_float(it0.get("bottom"))
+                if top > 0 and bottom > 0 and last_close > 0 and (last_close > top or last_close < bottom):
+                    raw = "|".join(
+                        str(x)
+                        for x in [
+                            _safe_int(it0.get("from_time")),
+                            _safe_int(it0.get("to_time")),
+                            round(top, 3),
+                            round(bottom, 3),
+                            _safe_int(it0.get("touches_top")),
+                            _safe_int(it0.get("touches_bottom")),
+                        ]
+                    )
+                    rect_id = f"rect_{tf}_{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:10]}"
+                    direction = "Bullish" if last_close > top else "Bearish"
+                    ev = {
+                        "id": "consolidation_rectangle_breakout",
+                        "type": "consolidation_rectangle_breakout",
+                        "direction": direction,
+                        "strength": "Medium",
+                        "score": 76.0,
+                        "evidence": {
+                            "rect_id": rect_id,
+                            "top": top,
+                            "bottom": bottom,
+                            "touches_top": _safe_int(it0.get("touches_top")),
+                            "touches_bottom": _safe_int(it0.get("touches_bottom")),
+                            "containment": _safe_float(it0.get("containment"), 0.0),
+                            "height_atr": _safe_float(it0.get("height_atr"), 0.0),
+                            "efficiency": _safe_float(it0.get("efficiency"), 0.0),
+                            "drift_atr": _safe_float(it0.get("drift_atr"), 0.0),
+                            "from_time": _safe_int(it0.get("from_time")),
+                            "to_time": _safe_int(it0.get("to_time")),
+                            "bar_time": _safe_int(last_bar.get("time")),
+                            "trigger_price": last_close,
+                        },
+                        "timeframe": tf,
+                    }
+                    events.append(ev)
 
         elif fid == "candlestick":
             highs = [float(b["high"]) for b in bars if b.get("high") is not None]
@@ -318,39 +446,6 @@ def eval_detector_trigger(rule: Dict[str, Any], state: Dict[str, Any], global_ca
                     it2 = dict(it)
                     it2["timeframe"] = tf
                     events.append(it2)
-        elif fid == "rectangle_breakout":
-            rep = detect_rectangle_ranges(
-                bars,
-                lookback_bars=int(prm.get("lookback_bars", 220)),
-                min_touches_per_side=int(prm.get("min_touches_per_side", 2)),
-                tolerance_atr_mult=float(prm.get("tolerance_atr_mult", 0.25)),
-                min_containment=float(prm.get("min_containment", 0.80)),
-                max_height_atr=float(prm.get("max_height_atr", 8.0)),
-                max_drift_atr=float(prm.get("max_drift_atr", 3.0)),
-                max_efficiency=float(prm.get("max_efficiency", 0.45)),
-                emit="distinct",
-                max_results=int(prm.get("max_results", 50)),
-                distinct_no_overlap=bool(prm.get("distinct_no_overlap", True)),
-                dedup_iou=float(prm.get("dedup_iou", 0.55)),
-            )
-            items = rep.get("items") if isinstance(rep, dict) else None
-            for it in items if isinstance(items, list) else []:
-                if not isinstance(it, dict):
-                    continue
-                bo = it.get("breakout")
-                if not isinstance(bo, dict):
-                    continue
-                d = bo.get("direction")
-                if d not in ("up", "down"):
-                    continue
-                it2 = dict(it)
-                it2["type"] = "rectangle_breakout"
-                it2["id"] = it.get("evidence_id") or "rectangle_breakout"
-                it2["direction"] = "Bullish" if d == "up" else "Bearish"
-                it2["score"] = float(it.get("score") or 75.0)
-                it2["confirm_time"] = bo.get("confirm_time")
-                it2["timeframe"] = tf
-                events.append(it2)
 
         elif fid == "bos_choch":
             got = detect_bos_choch(
@@ -459,7 +554,7 @@ def eval_detector_trigger(rule: Dict[str, Any], state: Dict[str, Any], global_ca
     direction = str(best_ev.get("direction") or "")
     tf_out = str(best_ev.get("timeframe") or default_tf)
     msg = f"Detector Trigger: {symbol} ({tf_out}) {ev_id} {direction} score={_safe_float(best_ev.get('score'), 0.0):.1f}"
-    return msg
+    return {"text": msg, "payload": {"best_event": best_ev}}
 
 def eval_london_break_asia_high_volume(rule: Dict[str, Any], state: Dict[str, Any]) -> Optional[str]:
     """
@@ -551,6 +646,7 @@ def eval_once() -> None:
         state = a.get("state") or {}
         typ = str(rule.get("type") or "")
         msg = None
+        trigger_payload = None
         
         # Original rule
         if typ == "london_break_asia_high_volume":
@@ -558,25 +654,40 @@ def eval_once() -> None:
         
         # New AI Agent Event Triggers
         elif typ == "raja_sr_touch":
-            msg = eval_raja_sr_touch(rule, state, global_cache_bars, global_cache_struct)
+            res = eval_raja_sr_touch(rule, state, global_cache_bars, global_cache_struct)
+            if isinstance(res, dict):
+                msg = res.get("text")
+                trigger_payload = res.get("payload")
         elif typ == "msb_zigzag_break":
-            msg = eval_msb_zigzag_break(rule, state, global_cache_bars, global_cache_struct)
+            res = eval_msb_zigzag_break(rule, state, global_cache_bars, global_cache_struct)
+            if isinstance(res, dict):
+                msg = res.get("text")
+                trigger_payload = res.get("payload")
         elif typ == "trend_exhaustion":
-            msg = eval_trend_exhaustion(rule, state, global_cache_bars, global_cache_struct)
-        elif typ == "rectangle_breakout":
-            msg = eval_rectangle_breakout(rule, state, global_cache_bars, global_cache_struct)
+            res = eval_trend_exhaustion(rule, state, global_cache_bars, global_cache_struct)
+            if isinstance(res, dict):
+                msg = res.get("text")
+                trigger_payload = res.get("payload")
+        elif typ == "consolidation_rectangle_breakout":
+            res = eval_consolidation_rectangle_breakout(rule, state, global_cache_bars, global_cache_struct)
+            if isinstance(res, dict):
+                msg = res.get("text")
+                trigger_payload = res.get("payload")
         elif typ == "detector_trigger":
-            msg = eval_detector_trigger(rule, state, global_cache_bars, global_cache_struct)
+            res = eval_detector_trigger(rule, state, global_cache_bars, global_cache_struct)
+            if isinstance(res, dict):
+                msg = res.get("text")
+                trigger_payload = res.get("payload")
         else:
             continue
 
         if msg:
             logger.info("alert_triggered alert_id=%s type=%s symbol=%s tf=%s", aid, typ, rule.get("symbol"), rule.get("timeframe"))
-            append_event(aid, msg)
+            append_event(aid, str(msg or ""))
             logger.info("alert_event_saved alert_id=%s", aid)
             
             # If it's an AI Agent Trigger, spin up a background agent workflow!
-            if typ in ["raja_sr_touch", "msb_zigzag_break", "trend_exhaustion", "rectangle_breakout", "detector_trigger"]:
+            if typ in ["raja_sr_touch", "msb_zigzag_break", "trend_exhaustion", "consolidation_rectangle_breakout", "detector_trigger"]:
                 configs = rule.get("agent_configs", {})
                 initial_prompt = configs.get("initial_prompt", f"Auto-triggered event: {msg}. Please analyze context and execute.")
                 session_id = f"evt_{aid}_{uuid.uuid4().hex[:8]}"
@@ -600,7 +711,8 @@ def eval_once() -> None:
                             alert_id=aid,
                             telegram_config=telegram_config,
                             trigger_type=typ,
-                            trigger_text=msg,
+                            trigger_text=str(msg or ""),
+                            trigger_payload=trigger_payload if isinstance(trigger_payload, dict) else None,
                         )
                     )
                     logger.info("alert_workflow_scheduled session=%s alert_id=%s", session_id, aid)

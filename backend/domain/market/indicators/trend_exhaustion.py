@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+import hashlib
+import datetime as dt
+
 
 def calc_trend_exhaustion(
     bars: List[Dict[str, Any]],
@@ -10,9 +13,20 @@ def calc_trend_exhaustion(
     long_len: int = 112,
     long_smooth: int = 3,
     threshold: int = 20,
-) -> Dict[str, bool]:
+) -> Dict[str, Any]:
     if len(bars) < max(short_len, long_len) + max(short_smooth, long_smooth):
-        return {"is_overbought": False, "is_oversold": False, "ob_reversal": False, "os_reversal": False}
+        return {
+            "is_overbought": False,
+            "is_oversold": False,
+            "ob_reversal": False,
+            "os_reversal": False,
+            "te_id": None,
+            "direction": None,
+            "box_high": None,
+            "box_low": None,
+            "trigger_time": None,
+            "trigger_time_iso": None,
+        }
 
     def get_highest(idx, length):
         start = max(0, idx - length + 1)
@@ -73,5 +87,47 @@ def calc_trend_exhaustion(
     ob_reversal = (not curr_ob) and prev_ob
     os_reversal = (not curr_os) and prev_os
 
-    return {"is_overbought": curr_ob, "is_oversold": curr_os, "ob_reversal": ob_reversal, "os_reversal": os_reversal}
+    direction = None
+    if ob_reversal:
+        direction = "bearish_reversal"
+    if os_reversal:
+        direction = "bullish_reversal"
 
+    te_id = None
+    box_high = None
+    box_low = None
+    trigger_time = None
+    trigger_time_iso = None
+
+    if direction:
+        trigger_idx = idx_prev
+        try:
+            trigger_time = int(bars[trigger_idx]["time"])
+        except Exception:
+            trigger_time = None
+        try:
+            box_high = float(get_highest(trigger_idx, short_len))
+            box_low = float(get_lowest(trigger_idx, short_len))
+        except Exception:
+            box_high = None
+            box_low = None
+        if trigger_time is not None:
+            raw = f"{trigger_time}|{direction}|{short_len}|{long_len}"
+            te_id = "te_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+            try:
+                trigger_time_iso = dt.datetime.fromtimestamp(int(trigger_time), tz=dt.timezone.utc).isoformat().replace("+00:00", "Z")
+            except Exception:
+                trigger_time_iso = None
+
+    return {
+        "is_overbought": curr_ob,
+        "is_oversold": curr_os,
+        "ob_reversal": ob_reversal,
+        "os_reversal": os_reversal,
+        "te_id": te_id,
+        "direction": direction,
+        "box_high": box_high,
+        "box_low": box_low,
+        "trigger_time": trigger_time,
+        "trigger_time_iso": trigger_time_iso,
+    }
